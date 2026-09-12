@@ -4,6 +4,10 @@ import { EMPTY_RESULT_ERROR_CODES, parseError, parseFound, parseSearchResults } 
 
 const ENDPOINT = 'https://searchapi.api.cloud.yandex.net/v2/web/search';
 const TRANSIENT_STATUSES = new Set([500, 502, 503, 504]);
+const TRANSIENT_XML_ERROR_CODES = new Set([20, 32, 55]);
+const FATAL_XML_ERROR_CODES = new Set([31, 33, 42, 44, 48]);
+const PERMANENT_XML_ERROR_CODES = new Set([1, 2, 18, 19, 37, 100, 10002]);
+const XML_RETRY_DELAYS = new Map([[20, 60_000], [32, 3_600_000], [55, 2_000]]);
 const RETRY_DELAYS = [1_000, 2_000, 4_000, 8_000];
 const MAX_ERROR_BODY = 100_000;
 
@@ -21,7 +25,7 @@ export function createSearchClient({ apiKey, folderId, db, fetchImpl = globalThi
       query: { searchType: 'SEARCH_TYPE_RU', queryText: query, familyMode: 'FAMILY_MODE_NONE', page: '0', fixTypoMode: 'FIX_TYPO_MODE_ON' },
       sortSpec: { sortMode: 'SORT_MODE_BY_RELEVANCE', sortOrder: 'SORT_ORDER_DESC' },
       groupSpec: { groupMode: 'GROUP_MODE_DEEP', groupsOnPage: '10', docsInGroup: '1' },
-      region: '225', l10N: 'LOCALIZATION_RU', folderId, responseFormat: 'FORMAT_XML',
+      region: '225', l10n: 'LOCALIZATION_RU', folderId, responseFormat: 'FORMAT_XML',
     };
     let transientAttempt = 0;
     for (;;) {
@@ -80,11 +84,17 @@ export function createSearchClient({ apiKey, folderId, db, fetchImpl = globalThi
       if (apiError && !EMPTY_RESULT_ERROR_CODES.has(apiError.code)) {
         recordAttempt({ queryId, status: response.status, startedAt, success: false, error: `XML error ${apiError.code}: ${apiError.message}`, body, responseBody: responseText });
         const error = new Error(`Yandex Search XML: ${apiError.message} (${apiError.code})`);
-        error.transient = true;
-        log('error', `Search XML system/quota error ${apiError.code}; wait: 60 sec`);
-        await sleepImpl(60_000);
-        transientAttempt = 0;
-        continue;
+        if (TRANSIENT_XML_ERROR_CODES.has(apiError.code)) {
+          const delay = XML_RETRY_DELAYS.get(apiError.code);
+          log('error', `Search XML error ${apiError.code}; retry in ${delay} ms`);
+          await sleepImpl(delay);
+          transientAttempt = 0;
+          continue;
+        }
+        if (FATAL_XML_ERROR_CODES.has(apiError.code)) error.fatalAuth = true;
+        else if (PERMANENT_XML_ERROR_CODES.has(apiError.code)) error.permanent = true;
+        else error.permanent = true;
+        throw error;
       }
       if (apiError) {
         recordAttempt({ queryId, status: response.status, startedAt, success: true, error: null, body, responseBody: responseText });
