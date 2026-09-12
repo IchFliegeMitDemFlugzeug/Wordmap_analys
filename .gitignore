@@ -1,0 +1,6 @@
+results/
+.env
+node_modules/
+.idea/
+*.log
+

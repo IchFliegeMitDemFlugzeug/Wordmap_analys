@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {intersectionSize,connectedComponents,selectRecursiveChildren} from '../src/research.mjs';
+test('recursive limits',()=>{const x=[...Array(130)].map((_,i)=>({type:'DIRECT',score:3,count:i})),y=[...Array(30)].map((_,i)=>({type:'ASSOCIATION',score:5,count:i}));const r=selectRecursiveChildren([...x,...y]);assert.equal(r.filter(x=>x.type==='DIRECT').length,100);assert.equal(r.filter(x=>x.type==='ASSOCIATION').length,20);});
+test('intersection and components',()=>{assert.equal(intersectionSize(new Set([1,2,3]),new Set([2,3,4])),2);assert.deepEqual(connectedComponents([1,2,3],[[1,2]]),[[1,2],[3]]);});

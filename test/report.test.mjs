@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,readFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {openDatabase,addQuery} from '../src/db.mjs';import {csvEscape,generateReport} from '../src/report.mjs';
+test('CSV escaping',()=>assert.equal(csvEscape('a;"b'),'"a;""b"'));
+test('report generation',()=>{const dir=mkdtempSync(join(tmpdir(),'wordmap-'));const db=openDatabase(':memory:');addQuery(db,'seed',{manualSeed:true,score:100});generateReport(db,dir);assert.ok(readFileSync(join(dir,'queries.csv')).toString().startsWith('\ufeff'));assert.match(readFileSync(join(dir,'report.html'),'utf8'),/Суммировать их напрямую нельзя/);db.close();});
