@@ -1,44 +1,166 @@
-const BASE = 'https://api.wordstat.yandex.net/v1';
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-export async function fetchWithRetry(url, options, onResponse = async () => {}) {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      const response = await fetch(url, options); await onResponse(response);
-      if (![500,502,503,504].includes(response.status) || attempt === 4) return response;
-    } catch (error) { if (attempt === 4) throw error; }
-    await sleep(1000 * (2 ** attempt));
-  }
+import { quotaState } from './db.mjs';
+import { log } from './logger.mjs';
+
+const BASE_URL = 'https://searchapi.api.cloud.yandex.net/v2/wordstat';
+const TRANSIENT_STATUSES = new Set([500, 502, 503, 504]);
+const RETRY_DELAYS = [1_000, 2_000, 4_000, 8_000];
+const MAX_ERROR_BODY = 100_000;
+
+export const defaultSleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+export function parseRetryAfter(value, now = Date.now()) {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - now) : null;
 }
-export async function safeJsonParse(response) { const text = await response.text(); try { return JSON.parse(text); } catch { throw new Error(`Некорректный JSON API (HTTP ${response.status})`); } }
-export function normalizeTree(nodes = []) { return nodes.map((node) => ({ id: String(node.id), name: node.name, type: node.type, children: normalizeTree(node.children ?? []) })); }
-export function buildFlatMap(nodes, map = new Map()) { for (const node of nodes) { map.set(String(node.id), node.name); buildFlatMap(node.children ?? [], map); } return map; }
-export function createWordstatClient({ apiKey, db }) {
-  let lastCall = 0;
-  async function request(method, body, queryId = null) {
-    const { quotaState } = await import('./db.mjs'); const quota = quotaState(db); if (quota.waitMs) await sleep(quota.waitMs);
-    await sleep(Math.max(0, 150 - (Date.now() - lastCall)));
+
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+export function flattenRegions(nodes, map = new Map()) {
+  for (const node of nodes ?? []) {
+    map.set(String(node.id), node.label);
+    flattenRegions(node.children, map);
+  }
+  return map;
+}
+
+export function collectDescendantIds(nodes, targetId) {
+  const result = new Set();
+  const collect = (node) => {
+    result.add(String(node.id));
+    for (const child of node.children ?? []) collect(child);
+  };
+  const find = (items) => {
+    for (const node of items ?? []) {
+      if (String(node.id) === String(targetId)) { collect(node); return true; }
+      if (find(node.children)) return true;
+    }
+    return false;
+  };
+  find(nodes);
+  return result;
+}
+
+export function createWordstatClient({ apiKey, folderId, db, fetchImpl = globalThis.fetch, sleepImpl = defaultSleep, nowImpl = Date.now }) {
+  let lastSentAt = null;
+  let regionsTree = null;
+  let regionNames = null;
+  let russiaRegionIds = null;
+
+  const recordAttempt = ({ method, queryId, status, startedAt, success, error, requestBody, responseBody }) => {
+    db.prepare(`INSERT INTO api_calls(api,method,query_id,http_status,started_at,finished_at,success,error,request_json,response_json)
+      VALUES(?,?,?,?,?,?,?,?,?,?)`).run(
+      'wordstat', method.replace(/^\//u, ''), queryId, status, startedAt,
+      new Date(nowImpl()).toISOString(), success ? 1 : 0, error,
+      JSON.stringify(requestBody), responseBody?.slice(0, MAX_ERROR_BODY) ?? null,
+    );
+  };
+
+  async function waitBeforeAttempt() {
+    const quota = quotaState(db, nowImpl());
+    if (quota.waitMs > 0) {
+      log('info', `Wordstat quota wait: ${quota.waitMs} ms`);
+      await sleepImpl(quota.waitMs);
+    }
+    if (lastSentAt !== null) await sleepImpl(Math.max(0, 150 - (nowImpl() - lastSentAt)));
+  }
+
+  async function request(endpoint, body, queryId = null) {
+    const requestBody = { ...body, folderId };
+    let transientAttempt = 0;
     for (;;) {
-      const started = new Date().toISOString(); let response;
+      await waitBeforeAttempt();
+      const startedAt = new Date(nowImpl()).toISOString();
+      lastSentAt = nowImpl();
+      let response;
       try {
-        response = await fetchWithRetry(`${BASE}${method}`, { method: 'POST', headers: { Authorization: `Api-Key ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); lastCall = Date.now();
-        const finished = new Date().toISOString(); db.prepare('INSERT INTO api_calls(api,method,query_id,http_status,started_at,finished_at,success,error) VALUES(?,?,?,?,?,?,?,?)').run('wordstat',method,queryId,response.status,started,finished,response.ok ? 1 : 0,response.ok ? null : `HTTP ${response.status}`);
-        if ([401,403].includes(response.status)) throw new Error('Доступ к Yandex API запрещён: проверьте ключ и Folder ID.');
-        if (response.status === 429) { const retry = Number(response.headers.get('retry-after')); await sleep(Number.isFinite(retry) ? retry * 1000 : 3900000); continue; }
-        if (!response.ok) throw new Error(`Wordstat API: HTTP ${response.status}`);
-        return safeJsonParse(response);
-      } catch (error) { if (response && [401,403].includes(response.status)) throw error; throw error; }
+        response = await fetchImpl(`${BASE_URL}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Api-Key ${apiKey}` },
+          body: JSON.stringify(requestBody),
+        });
+      } catch (error) {
+        recordAttempt({ method: endpoint, queryId, status: null, startedAt, success: false, error: error.message, requestBody });
+        const delay = RETRY_DELAYS[transientAttempt++] ?? 60_000;
+        if (delay === 60_000) { log('error', 'Wordstat network/server wait: 60 sec'); transientAttempt = 0; }
+        await sleepImpl(delay);
+        continue;
+      }
+
+      const responseText = await response.text();
+      if (response.ok) {
+        let data;
+        try { data = responseText ? JSON.parse(responseText) : {}; }
+        catch { data = null; }
+        if (data === null) {
+          recordAttempt({ method: endpoint, queryId, status: response.status, startedAt, success: false, error: 'Некорректный JSON API', requestBody, responseBody: responseText });
+          const error = new Error(`Некорректный JSON API (HTTP ${response.status})`);
+          error.permanent = true;
+          throw error;
+        }
+        recordAttempt({ method: endpoint, queryId, status: response.status, startedAt, success: true, error: null, requestBody, responseBody: responseText });
+        return data;
+      }
+
+      recordAttempt({ method: endpoint, queryId, status: response.status, startedAt, success: false, error: `HTTP ${response.status}`, requestBody, responseBody: responseText });
+      if (response.status === 429) {
+        const delay = parseRetryAfter(response.headers.get('retry-after'), nowImpl()) ?? 3_900_000;
+        log('error', `Wordstat HTTP 429; wait: ${delay} ms`);
+        transientAttempt = 0;
+        await sleepImpl(delay);
+        continue;
+      }
+      if (TRANSIENT_STATUSES.has(response.status)) {
+        const delay = RETRY_DELAYS[transientAttempt++] ?? 60_000;
+        if (delay === 60_000) { log('error', 'Wordstat network/server wait: 60 sec'); transientAttempt = 0; }
+        await sleepImpl(delay);
+        continue;
+      }
+      const error = new Error(`Wordstat API: HTTP ${response.status}${responseText ? ` — ${responseText.slice(0, 500)}` : ''}`);
+      if (response.status === 401 || response.status === 403) error.fatalAuth = true;
+      else if (response.status >= 400 && response.status < 500) error.permanent = true;
+      throw error;
     }
   }
-  return {
-    getTopRequests: (phrase, queryId) => request('/topRequests', { phrase, numPhrases: 2000, regions: ['225'], devices: ['DEVICE_ALL'] }, queryId),
-    getDynamics: (phrase, dates, queryId) => request('/dynamics', { phrase, period: 'PERIOD_MONTHLY', region: '225', device: 'DEVICE_ALL', ...dates }, queryId),
-    getRegionsDistribution: (phrase, queryId) => request('/regions', { phrase, regionType: 'REGION_REGIONS', devices: ['DEVICE_ALL'] }, queryId),
-    getRegionsTree: () => request('/getRegionsTree', {}),
-  };
+
+  async function getTopRequests(phrase, queryId) {
+    const data = await request('/topRequests', { phrase, numPhrases: '2000', regions: ['225'], devices: ['DEVICE_ALL'] }, queryId);
+    const normalize = (item) => ({ phrase: item.phrase, count: Number(item.count) });
+    return { totalCount: Number(data.totalCount ?? 0), results: (data.results ?? []).map(normalize), associations: (data.associations ?? []).map(normalize), raw: data };
+  }
+
+  async function getDynamics(phrase, dates, queryId) {
+    const data = await request('/dynamics', {
+      phrase, period: 'PERIOD_MONTHLY', fromDate: `${dates.fromDate}T00:00:00Z`, toDate: `${dates.toDate}T00:00:00Z`,
+      regions: ['225'], devices: ['DEVICE_ALL'],
+    }, queryId);
+    return { results: (data.results ?? []).map((item) => ({ date: String(item.date).split('T')[0], count: Number(item.count ?? 0), share: finiteOrNull(item.share) })), raw: data };
+  }
+
+  async function getRegionsTree() {
+    if (regionsTree) return { regions: regionsTree, regionNames, russiaRegionIds, raw: { regions: regionsTree } };
+    const raw = await request('/getRegionsTree', {});
+    regionsTree = raw.regions ?? [];
+    regionNames = flattenRegions(regionsTree);
+    russiaRegionIds = collectDescendantIds(regionsTree, '225');
+    return { regions: regionsTree, regionNames, russiaRegionIds, raw };
+  }
+
+  async function getRegionsDistribution(phrase, queryId) {
+    await getRegionsTree();
+    const data = await request('/regions', { phrase, region: 'REGION_REGIONS', devices: ['DEVICE_ALL'] }, queryId);
+    const results = (data.results ?? []).filter((item) => russiaRegionIds.has(String(item.region))).map((item) => ({
+      regionId: String(item.region), regionName: regionNames.get(String(item.region)) ?? `Region ${item.region}`,
+      count: Number(item.count ?? 0), share: finiteOrNull(item.share), affinityIndex: finiteOrNull(item.affinityIndex),
+    }));
+    return { results, raw: data };
+  }
+
+  return { getTopRequests, getDynamics, getRegionsDistribution, getRegionsTree };
 }
-let defaultClient;
-export function configureWordstat(options) { defaultClient = createWordstatClient(options); return defaultClient; }
-export const getTopRequests = (...args) => defaultClient.getTopRequests(...args);
-export const getDynamics = (...args) => defaultClient.getDynamics(...args);
-export const getRegionsDistribution = (...args) => defaultClient.getRegionsDistribution(...args);
-export const getRegionsTree = (...args) => defaultClient.getRegionsTree(...args);

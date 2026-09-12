@@ -1,20 +1,162 @@
 import { writeFileSync } from 'node:fs';
-import { addQuery, getMeta, setMeta } from './db.mjs';
-import { normalizeQuery, normalizeUrl, scoreQuery } from './scoring.mjs';
-import { completedPeriod, PERIOD_MONTHLY } from './vendor/yandex/wordstat-dates.mjs';
+import { addQuery, setMeta } from './db.mjs';
+import { log } from './logger.mjs';
+import { normalizeUrl, scoreQuery } from './scoring.mjs';
+import { alignDates, formatDate } from './vendor/yandex/wordstat-dates.mjs';
+
 export const MAX_DEPTH = 2;
-export const BRAND_TERMS = ['', 'fuel tank','fuel fitting','fuel clunk','fuel filter','fuel valve','fuel tubing','топливный бак','штуцер','топливный штуцер','топливный фильтр','топливный клапан','топливная трубка'];
-export function parseInput(text) { const seeds=[], brands=[]; for (const raw of text.split(/\r?\n/u)) { const line=raw.trim(); if (!line || line.startsWith('#')) continue; if (/^@brand\s+/iu.test(line)) brands.push(line.replace(/^@brand\s+/iu,'').trim()); else seeds.push(line); } return { seeds, brands }; }
-export function expandBrands(brands) { return brands.flatMap((brand) => BRAND_TERMS.map((term) => !term ? brand : /[а-яё]/iu.test(term) ? `${term} ${brand}` : `${brand} ${term}`)); }
-export function selectRecursiveChildren(children) { const sort=(a,b)=>b.score-a.score || b.count-a.count; return [...children.filter(x=>x.type==='DIRECT'&&x.score>=3).sort(sort).slice(0,100), ...children.filter(x=>x.type==='ASSOCIATION'&&x.score>=5).sort(sort).slice(0,20)]; }
-export function intersectionSize(a,b) { let n=0; for (const value of a) if (b.has(value)) n++; return n; }
-export function connectedComponents(items, edges) { const graph=new Map(items.map(x=>[x,new Set()])); for(const [a,b] of edges){graph.get(a)?.add(b);graph.get(b)?.add(a);} const seen=new Set(), out=[]; for(const item of items){if(seen.has(item))continue;const stack=[item],part=[];seen.add(item);while(stack.length){const x=stack.pop();part.push(x);for(const y of graph.get(x)){if(!seen.has(y)){seen.add(y);stack.push(y);}}}out.push(part);}return out; }
-export async function runResearch({ db, client, runDir, brands, generateReport }) {
-  if (!getMeta(db,'regions_tree')) setMeta(db,'regions_tree',JSON.stringify(await client.getRegionsTree()));
-  for (;;) { const parent=db.prepare("SELECT * FROM queries WHERE status='queued' AND depth<=? ORDER BY manual_seed DESC,score DESC,depth ASC,id ASC LIMIT 1").get(MAX_DEPTH); if(!parent)break; db.prepare("UPDATE queries SET status='processing' WHERE id=?").run(parent.id);
-    try { const raw=await client.getTopRequests(parent.query,parent.id); db.prepare('INSERT OR REPLACE INTO wordstat_top VALUES(?,?,?,?)').run(parent.id,raw.totalCount??raw.total_count??0,JSON.stringify(raw),new Date().toISOString()); const all=[...(raw.results??[]).map(x=>({...x,type:'DIRECT'})),...(raw.associations??[]).map(x=>({...x,type:'ASSOCIATION'}))]; const candidates=[]; for(const x of all){const phrase=x.phrase??x.query??x.text;if(!phrase)continue;const score=scoreQuery(phrase,{brands});const child=addQuery(db,phrase,{depth:parent.depth+1,score,status:'stored',rootSeed:parent.root_seed});db.prepare('INSERT OR REPLACE INTO relations VALUES(?,?,?,?,?)').run(parent.id,child.id,x.type,x.count??0,new Date().toISOString());candidates.push({id:child.id,type:x.type,score,count:x.count??0});} for(const child of selectRecursiveChildren(candidates)) if(parent.depth+1<=MAX_DEPTH) db.prepare("UPDATE queries SET status='queued' WHERE id=? AND status='stored'").run(child.id); db.prepare("UPDATE queries SET status='done' WHERE id=?").run(parent.id); await generateReport?.(false);
-    } catch(error){db.prepare("UPDATE queries SET status='queued' WHERE id=?").run(parent.id); if(/запрещен/iu.test(error.message))throw error; console.error(`Запрос «${parent.query}» отложен: ${error.message}`); break;}}
-  const dates=completedPeriod(PERIOD_MONTHLY,24); const deep=db.prepare('SELECT * FROM queries WHERE manual_seed=1 OR score>=6').all();
-  for(const q of deep){try{if(!db.prepare('SELECT 1 FROM dynamics WHERE query_id=?').get(q.id)){const data=await client.getDynamics(q.query,dates,q.id);for(const x of data.dynamics??data.results??[])db.prepare('INSERT OR REPLACE INTO dynamics VALUES(?,?,?,?)').run(q.id,x.date,x.count??0,x.share??null);}if(!db.prepare('SELECT 1 FROM regions WHERE query_id=?').get(q.id)){const data=await client.getRegionsDistribution(q.query,q.id);for(const x of data.regions??data.results??[])db.prepare('INSERT OR REPLACE INTO regions VALUES(?,?,?,?,?,?)').run(q.id,String(x.regionId??x.id),x.regionName??x.name,x.count??0,x.share??null,x.affinityIndex??null);}if(!db.prepare('SELECT 1 FROM serp WHERE query_id=?').get(q.id)){const {results,rawXml}=await client.search(q.query);writeFileSync(`${runDir}/raw/serp_${q.id}.xml`,rawXml);for(const x of results)db.prepare('INSERT OR REPLACE INTO serp VALUES(?,?,?,?,?,?,?,?)').run(q.id,x.position,x.url,normalizeUrl(x.url),x.domain,x.title,x.snippet,new Date().toISOString());}}catch(error){if(/запрещен/iu.test(error.message))throw error;console.error(`Глубокий анализ «${q.query}» отложен: ${error.message}`);}}
+export const BRAND_TERMS = ['', 'fuel tank', 'fuel fitting', 'fuel clunk', 'fuel filter', 'fuel valve', 'fuel tubing', 'топливный бак', 'штуцер', 'топливный штуцер', 'топливный фильтр', 'топливный клапан', 'топливная трубка'];
+
+export function parseInput(text) {
+  const seeds = [];
+  const brands = [];
+  for (const raw of text.split(/\r?\n/u)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    if (/^@brand\s+/iu.test(line)) brands.push(line.replace(/^@brand\s+/iu, '').trim());
+    else seeds.push(line);
+  }
+  return { seeds, brands };
 }
-export function clusterSerp(db){db.exec('DELETE FROM cluster_queries; DELETE FROM clusters');const rows=db.prepare('SELECT q.id,q.query,q.score,COALESCE(w.total_count,0) total_count,s.normalized_url FROM queries q JOIN serp s ON s.query_id=q.id LEFT JOIN wordstat_top w ON w.query_id=q.id').all(),map=new Map();for(const r of rows){if(!map.has(r.id))map.set(r.id,{...r,urls:new Set()});map.get(r.id).urls.add(r.normalized_url);}const ids=[...map.keys()],edges=[];for(let i=0;i<ids.length;i++)for(let j=i+1;j<ids.length;j++)if(intersectionSize(map.get(ids[i]).urls,map.get(ids[j]).urls)>=3)edges.push([ids[i],ids[j]]);for(const part of connectedComponents(ids,edges)){const best=part.map(id=>map.get(id)).sort((a,b)=>b.score-a.score||b.total_count-a.total_count)[0];const info=db.prepare('INSERT INTO clusters(name) VALUES(?)').run(best.query);for(const id of part)db.prepare('INSERT INTO cluster_queries VALUES(?,?)').run(info.lastInsertRowid,id);}return connectedComponents(ids,edges);}
+
+export function expandBrands(brands) {
+  return brands.flatMap((brand) => BRAND_TERMS.map((term) => !term ? brand : /[а-яё]/iu.test(term) ? `${term} ${brand}` : `${brand} ${term}`));
+}
+
+export function selectRecursiveChildren(children) {
+  const sort = (a, b) => b.score - a.score || b.count - a.count;
+  return [
+    ...children.filter((item) => item.type === 'DIRECT' && item.score >= 3).sort(sort).slice(0, 100),
+    ...children.filter((item) => item.type === 'ASSOCIATION' && item.score >= 5).sort(sort).slice(0, 20),
+  ];
+}
+
+export function getLast24CompletedMonths(now = new Date()) {
+  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+  const from = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth() - 23, 1));
+  return alignDates('monthly', formatDate(from), formatDate(to), now);
+}
+
+export function intersectionSize(a, b) {
+  let count = 0;
+  for (const value of a) if (b.has(value)) count += 1;
+  return count;
+}
+
+export function connectedComponents(items, edges) {
+  const graph = new Map(items.map((item) => [item, new Set()]));
+  for (const [a, b] of edges) { graph.get(a)?.add(b); graph.get(b)?.add(a); }
+  const seen = new Set();
+  const output = [];
+  for (const item of items) {
+    if (seen.has(item)) continue;
+    const stack = [item];
+    const part = [];
+    seen.add(item);
+    while (stack.length) {
+      const current = stack.pop();
+      part.push(current);
+      for (const adjacent of graph.get(current)) if (!seen.has(adjacent)) { seen.add(adjacent); stack.push(adjacent); }
+    }
+    output.push(part);
+  }
+  return output;
+}
+
+function setStage(db, queryId, stage, status) {
+  db.prepare(`UPDATE analysis_status SET ${stage}_status=?, updated_at=? WHERE query_id=?`).run(status, new Date().toISOString(), queryId);
+}
+
+async function runStage({ db, q, stage, execute, save, generateReport }) {
+  if (q[`${stage}_status`] !== 'pending') return;
+  setStage(db, q.id, stage, 'processing');
+  try {
+    const data = await execute();
+    db.transaction(() => { save(data); setStage(db, q.id, stage, 'done'); })();
+    log('info', `Deep stage done: ${stage}, query ${q.id}`);
+    await generateReport?.();
+  } catch (error) {
+    if (error.fatalAuth) { setStage(db, q.id, stage, 'pending'); throw error; }
+    if (error.permanent) {
+      setStage(db, q.id, stage, 'failed');
+      log('error', `Deep stage failed: ${stage}, query ${q.id}: ${error.message}`);
+      return;
+    }
+    setStage(db, q.id, stage, 'pending');
+    throw error;
+  }
+}
+
+export async function runResearch({ db, client, runDir, brands, generateReport }) {
+  const tree = await client.getRegionsTree();
+  setMeta(db, 'regions_tree', JSON.stringify(tree.regions));
+  for (;;) {
+    const parent = db.prepare("SELECT * FROM queries WHERE status='queued' AND depth<=? ORDER BY manual_seed DESC,score DESC,depth ASC,id ASC LIMIT 1").get(MAX_DEPTH);
+    if (!parent) break;
+    db.prepare("UPDATE queries SET status='processing' WHERE id=?").run(parent.id);
+    try {
+      const raw = await client.getTopRequests(parent.query, parent.id);
+      db.prepare('INSERT OR REPLACE INTO wordstat_top VALUES(?,?,?,?)').run(parent.id, raw.totalCount, JSON.stringify(raw.raw), new Date().toISOString());
+      const all = [
+        ...raw.results.map((item) => ({ ...item, type: 'DIRECT' })),
+        ...raw.associations.map((item) => ({ ...item, type: 'ASSOCIATION' })),
+      ];
+      const candidates = [];
+      for (const item of all) {
+        if (!item.phrase) continue;
+        const score = scoreQuery(item.phrase, { brands });
+        const child = addQuery(db, item.phrase, { depth: parent.depth + 1, score, status: 'stored', rootSeed: parent.root_seed });
+        db.prepare('INSERT OR REPLACE INTO relations VALUES(?,?,?,?,?)').run(parent.id, child.id, item.type, item.count, new Date().toISOString());
+        candidates.push({ id: child.id, type: item.type, score, count: item.count });
+      }
+      for (const child of selectRecursiveChildren(candidates)) {
+        if (parent.depth + 1 <= MAX_DEPTH) db.prepare("UPDATE queries SET status='queued' WHERE id=? AND status='stored'").run(child.id);
+      }
+      db.prepare("UPDATE queries SET status='done' WHERE id=?").run(parent.id);
+      log('info', `Query discovery completed: ${parent.id} «${parent.query}»`);
+      await generateReport?.();
+    } catch (error) {
+      if (error.fatalAuth) { db.prepare("UPDATE queries SET status='queued' WHERE id=?").run(parent.id); throw error; }
+      if (error.permanent) {
+        db.prepare("UPDATE queries SET status='failed' WHERE id=?").run(parent.id);
+        log('error', `Query discovery failed: ${parent.id} «${parent.query}»: ${error.message}`);
+        continue;
+      }
+      db.prepare("UPDATE queries SET status='queued' WHERE id=?").run(parent.id);
+      throw error;
+    }
+  }
+
+  const timestamp = new Date().toISOString();
+  db.prepare(`INSERT OR IGNORE INTO analysis_status(query_id,updated_at)
+    SELECT id,? FROM queries WHERE manual_seed=1 OR score>=6`).run(timestamp);
+  const dates = getLast24CompletedMonths();
+  const deep = db.prepare(`SELECT q.*,a.dynamics_status,a.regions_status,a.serp_status FROM queries q
+    JOIN analysis_status a ON a.query_id=q.id ORDER BY q.id`).all();
+  for (const q of deep) {
+    await runStage({ db, q, stage: 'dynamics', execute: () => client.getDynamics(q.query, dates, q.id), generateReport,
+      save: (data) => { db.prepare('DELETE FROM dynamics WHERE query_id=?').run(q.id); for (const item of data.results) db.prepare('INSERT INTO dynamics VALUES(?,?,?,?)').run(q.id, item.date, item.count, item.share); } });
+    await runStage({ db, q, stage: 'regions', execute: () => client.getRegionsDistribution(q.query, q.id), generateReport,
+      save: (data) => { db.prepare('DELETE FROM regions WHERE query_id=?').run(q.id); for (const item of data.results) db.prepare('INSERT INTO regions VALUES(?,?,?,?,?,?)').run(q.id, item.regionId, item.regionName, item.count, item.share, item.affinityIndex); } });
+    await runStage({ db, q, stage: 'serp', execute: () => client.search(q.query, q.id), generateReport,
+      save: (data) => { writeFileSync(`${runDir}/raw/serp_${q.id}.xml`, data.rawXml); db.prepare('DELETE FROM serp WHERE query_id=?').run(q.id); for (const item of data.results) db.prepare('INSERT INTO serp VALUES(?,?,?,?,?,?,?,?)').run(q.id, item.position, item.url, normalizeUrl(item.url), item.domain, item.title, item.snippet, new Date().toISOString()); } });
+  }
+}
+
+export function clusterSerp(db) {
+  db.exec('DELETE FROM cluster_queries; DELETE FROM clusters');
+  const rows = db.prepare(`SELECT q.id,q.query,q.score,COALESCE(w.total_count,(SELECT MAX(r.count) FROM relations r WHERE r.child_query_id=q.id),0) popularity,s.normalized_url
+    FROM queries q JOIN serp s ON s.query_id=q.id LEFT JOIN wordstat_top w ON w.query_id=q.id`).all();
+  const map = new Map();
+  for (const row of rows) { if (!map.has(row.id)) map.set(row.id, { ...row, urls: new Set() }); map.get(row.id).urls.add(row.normalized_url); }
+  const ids = [...map.keys()];
+  const edges = [];
+  for (let i = 0; i < ids.length; i += 1) for (let j = i + 1; j < ids.length; j += 1) if (intersectionSize(map.get(ids[i]).urls, map.get(ids[j]).urls) >= 3) edges.push([ids[i], ids[j]]);
+  const components = connectedComponents(ids, edges);
+  for (const part of components) {
+    const best = part.map((id) => map.get(id)).sort((a, b) => b.score - a.score || b.popularity - a.popularity)[0];
+    const info = db.prepare('INSERT INTO clusters(name) VALUES(?)').run(best.query);
+    for (const id of part) db.prepare('INSERT INTO cluster_queries VALUES(?,?)').run(info.lastInsertRowid, id);
+  }
+  return components;
+}
