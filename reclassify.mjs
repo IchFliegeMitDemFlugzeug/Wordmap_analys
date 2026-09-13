@@ -6,7 +6,7 @@ if (!runDirectory) {
   process.exitCode = 1;
 } else {
   try {
-    const result = reclassifyRun(runDirectory);
+    const result = await reclassifyRun(runDirectory);
     console.log(`Переклассифицировано запросов: ${result.queries}. Отчёт: ${result.runDir}/report.html`);
   } catch (error) {
     console.error(`Ошибка переклассификации: ${error.message}`);

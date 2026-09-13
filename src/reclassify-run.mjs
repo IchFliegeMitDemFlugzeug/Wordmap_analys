@@ -1,5 +1,6 @@
-import { copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import { ALGORITHM_VERSION } from './config.mjs';
 import { openDatabase, setMeta } from './db.mjs';
 import { generateReport } from './report.mjs';
@@ -16,14 +17,21 @@ function strongerClassification(left, right) {
   return Number(right.deepEligible) > Number(left.deepEligible) ? right : left;
 }
 
-export function reclassifyRun(runDirectory) {
+export async function reclassifyRun(runDirectory) {
   const runDir = path.resolve(runDirectory);
   const databaseFile = path.join(runDir, 'research.sqlite');
   const inputFile = path.join(runDir, 'input.txt');
   const backupFile = path.join(runDir, 'research.before-reclassify.sqlite');
   if (!existsSync(databaseFile)) throw new Error(`Не найден файл ${databaseFile}`);
   if (!existsSync(inputFile)) throw new Error(`Не найден файл ${inputFile}`);
-  if (!existsSync(backupFile)) copyFileSync(databaseFile, backupFile);
+  if (!existsSync(backupFile)) {
+    const source = new Database(databaseFile, { readonly: true });
+    try {
+      await source.backup(backupFile);
+    } finally {
+      source.close();
+    }
+  }
   const { brands, entities } = parseInput(readFileSync(inputFile, 'utf8'));
   const db = openDatabase(databaseFile);
   try {

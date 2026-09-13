@@ -58,7 +58,10 @@ export function addQuery(db, query, data = {}) {
   const normalized = normalizeQuery(query);
   const existingRank = "CASE queries.relevance_class WHEN 'core' THEN 4 WHEN 'adjacent' THEN 3 WHEN 'broad' THEN 2 ELSE 1 END";
   const incomingRank = "CASE excluded.relevance_class WHEN 'core' THEN 4 WHEN 'adjacent' THEN 3 WHEN 'broad' THEN 2 ELSE 1 END";
-  const useIncoming = `queries.manual_seed=0 AND (excluded.manual_seed=1 OR ${incomingRank}>${existingRank})`;
+  const strongerEligibility = `excluded.recursive_eligible>queries.recursive_eligible OR
+    (excluded.recursive_eligible=queries.recursive_eligible AND excluded.deep_eligible>queries.deep_eligible)`;
+  const useIncoming = `queries.manual_seed=0 AND (excluded.manual_seed=1 OR ${incomingRank}>${existingRank} OR
+    (${incomingRank}=${existingRank} AND (${strongerEligibility})))`;
   db.prepare(`INSERT INTO queries(query,normalized,depth,score,manual_seed,brand_seed,status,root_seed,first_seen_at,last_seen_at,relevance_class,relevance_reason,recursive_eligible,deep_eligible,expansion_status,skip_reason)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(normalized) DO UPDATE SET last_seen_at=excluded.last_seen_at,

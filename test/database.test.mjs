@@ -54,5 +54,13 @@ test('deduplication preserves or promotes one internally consistent relevance de
   addQuery(db, 'another query', { relevanceClass: 'adjacent', reasons: ['adjacent later'], recursiveEligible: true, deepEligible: true });
   row = db.prepare("SELECT relevance_class,relevance_reason,recursive_eligible,deep_eligible FROM queries WHERE normalized='another query'").get();
   assert.deepEqual(row, { relevance_class: 'adjacent', relevance_reason: '["adjacent later"]', recursive_eligible: 1, deep_eligible: 1 });
+  addQuery(db, 'forward order', { relevanceClass: 'core', reasons: ['not recursive'], recursiveEligible: false, deepEligible: true });
+  addQuery(db, 'forward order', { relevanceClass: 'core', reasons: ['recursive'], recursiveEligible: true, deepEligible: true });
+  addQuery(db, 'reverse order', { relevanceClass: 'core', reasons: ['recursive'], recursiveEligible: true, deepEligible: true });
+  addQuery(db, 'reverse order', { relevanceClass: 'core', reasons: ['not recursive'], recursiveEligible: false, deepEligible: true });
+  for (const normalized of ['forward order', 'reverse order']) {
+    row = db.prepare('SELECT relevance_class,relevance_reason,recursive_eligible,deep_eligible FROM queries WHERE normalized=?').get(normalized);
+    assert.deepEqual(row, { relevance_class: 'core', relevance_reason: '["recursive"]', recursive_eligible: 1, deep_eligible: 1 });
+  }
   db.close();
 });

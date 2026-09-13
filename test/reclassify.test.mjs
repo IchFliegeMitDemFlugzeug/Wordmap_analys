@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { ALGORITHM_VERSION } from '../src/config.mjs';
 import { addQuery, getMeta, openDatabase } from '../src/db.mjs';
 import { reclassifyRun } from '../src/reclassify-run.mjs';
 
-test('offline reclassification changes only decisions and creates reports without API clients', () => {
+test('offline reclassification creates a consistent WAL-aware backup without API clients', async () => {
   const runDir = mkdtempSync(join(tmpdir(), 'wordmap-reclassify-'));
   mkdirSync(join(runDir, 'raw'));
   writeFileSync(join(runDir, 'input.txt'), '@entity DLE130G\nтопливный бак БПЛА\n');
@@ -20,11 +21,17 @@ test('offline reclassification changes only decisions and creates reports withou
   db.prepare('INSERT INTO relations VALUES(?,?,?,?,?)').run(parent.id, noise.id, 'ASSOCIATION', 10, new Date().toISOString());
   db.prepare('INSERT INTO api_calls(api,method,success,started_at) VALUES(?,?,?,?)').run('wordstat', 'getTopRequests', 1, new Date().toISOString());
   const before = Object.fromEntries(['queries', 'relations', 'api_calls', 'wordstat_top', 'dynamics', 'regions', 'serp'].map((table) => [table, db.prepare(`SELECT COUNT(*) count FROM ${table}`).get().count]));
-  db.close();
-  reclassifyRun(runDir);
+  assert.ok(existsSync(`${databaseFile}-wal`));
+  await reclassifyRun(runDir);
   assert.ok(existsSync(join(runDir, 'research.before-reclassify.sqlite')));
+  const backup = new Database(join(runDir, 'research.before-reclassify.sqlite'), { readonly: true });
+  assert.equal(backup.prepare("SELECT COUNT(*) count FROM queries WHERE query='DLE130G fuel system'").get().count, 1);
+  assert.equal(backup.prepare('SELECT COUNT(*) count FROM relations').get().count, 2);
+  assert.equal(backup.prepare('SELECT COUNT(*) count FROM api_calls').get().count, 1);
+  backup.close();
+  db.close();
   const originalBackup = readFileSync(join(runDir, 'research.before-reclassify.sqlite'));
-  reclassifyRun(runDir);
+  await reclassifyRun(runDir);
   assert.deepEqual(readFileSync(join(runDir, 'research.before-reclassify.sqlite')), originalBackup);
   assert.ok(existsSync(join(runDir, 'queries.csv')));
   assert.match(readFileSync(join(runDir, 'report.html'), 'utf8'), /ADJACENT/u);
