@@ -1,0 +1,325 @@
+# ПРОГОН 2
+# ДВС, силовые установки и узлы, максимально близкие к топливной системе.
+# Только Китай и Россия.
+# Цель: найти мосты "двигатель/модель -> бак/топливная система/подача топлива".
+
+# =========================================================
+# КИТАЙ — DLE / DL ENGINE
+# =========================================================
+@brand DLE
+@brand DL Engine
+DLE UAV engine
+DLE двигатель БПЛА
+DLE авиационный двигатель
+DLE двигатель купить
+DLE двигатель цена
+DLE топливная система
+DLE топливный бак
+бак для DLE
+DLE fuel system
+DLE fuel tank
+DLE fuel pump
+DLE fuel filter
+DLE fuel line
+DLE fuel consumption
+DLE20
+DLE40
+DLE60
+DLE130
+DLE130G
+DLE170
+DLE200
+DLE222
+DLE400
+DLE430
+DLE60 fuel tank
+DLE60 топливный бак
+DLE130 fuel tank
+DLE130 топливный бак
+DLE130G fuel tank
+DLE130G топливный бак
+DLE130G fuel system
+DLE170 fuel tank
+DLE170 топливный бак
+DLE200 fuel tank
+DLE222 fuel tank
+DLE400 fuel tank
+DLE430 fuel tank
+
+# =========================================================
+# КИТАЙ — NGH
+# =========================================================
+@brand NGH
+NGH UAV engine
+NGH двигатель БПЛА
+NGH авиационный двигатель
+NGH двигатель купить
+NGH двигатель цена
+NGH топливная система
+NGH топливный бак
+NGH fuel system
+NGH fuel tank
+NGH EFI
+NGH ISG
+NGH starter generator
+GF35-GE
+GT35-ISG
+GF38-GE
+GTT70EFI
+GTT70-ISG
+GTT130-E-G
+GTT130-ISG-EFI
+GTT170-E-G
+GTT275
+WGT275
+GTT400
+GTF550
+GTF550-EFI
+WGT550
+GTT70EFI fuel tank
+GTT70EFI fuel system
+GTT70-ISG fuel tank
+GTT130-E-G fuel tank
+GTT130-ISG-EFI fuel tank
+GTT130-ISG-EFI fuel system
+GTT170-E-G fuel tank
+GTT275 fuel tank
+WGT275 fuel tank
+GTT400 fuel tank
+GTF550 fuel tank
+WGT550 fuel tank
+
+# =========================================================
+# КИТАЙ — DLA / SHANDONG FEIAO
+# =========================================================
+@brand DLA
+@brand Shandong Feiao
+DLA UAV engine
+DLA двигатель БПЛА
+DLA aviation engine
+DLA gasoline UAV engine
+DLA kerosene UAV engine
+DLA hybrid engine
+DLA двигатель купить
+DLA двигатель цена
+DLA топливная система
+DLA топливный бак
+DLA fuel tank
+DLA fuel system
+DLA fuel injection
+DLA starter generator
+DLA58
+DLA116
+DLA180
+DLA232
+DLA468
+DLA720
+DLA58 fuel tank
+DLA116 fuel tank
+DLA116 топливный бак
+DLA180 fuel tank
+DLA180 топливный бак
+DLA232 fuel tank
+DLA468 fuel tank
+DLA720 fuel tank
+58cc UAV engine China
+116cc UAV engine China
+180cc UAV engine China
+232cc UAV engine China
+468cc UAV engine China
+720cc UAV engine China
+авиационный керосиновый двигатель БПЛА Китай
+бензиновый двигатель БПЛА Китай
+двигатель БПЛА с электростартером Китай
+двигатель БПЛА с генератором Китай
+
+# =========================================================
+# КИТАЙ — DE ENGINE
+# =========================================================
+@brand DE Engine
+DE Engine UAV
+DE Engine UAV engine
+DE Engine двигатель БПЛА
+DE Engine топливная система
+DE Engine топливный бак
+DE Engine fuel system
+DE Engine fuel tank
+DE Engine EFI
+DE Engine generator
+DE170
+DE350
+DE500
+DE550
+DE730
+DE170 fuel tank
+DE170 топливный бак
+DE350 fuel tank
+DE500 fuel tank
+DE550 fuel tank
+DE730 fuel tank
+
+# =========================================================
+# КИТАЙ — RCGF / STINGER
+# =========================================================
+@brand RCGF
+@brand Stinger Engines
+RCGF UAV engine
+RCGF двигатель БПЛА
+RCGF fuel system
+RCGF fuel tank
+RCGF топливный бак
+Stinger UAV engine
+Stinger fuel system
+Stinger fuel tank
+Stinger топливный бак
+Stinger 70 Twin
+Stinger 70 Twin with Starter
+Stinger Pro 125 Twin
+Stinger Pro 125 Twin with Front Starter
+Stinger Pro 125 Twin with Back Starter
+Stinger Pro 185 Twin
+Stinger Pro 185 Twin with Starter
+Stinger Pro 250CC Four Cylinder Engine
+Stinger 70 fuel tank
+Stinger 125 fuel tank
+Stinger 185 fuel tank
+Stinger 250 fuel tank
+
+# =========================================================
+# КИТАЙ — ЗАЖИГАНИЕ / НАСОСЫ / СЕРВО ДРОССЕЛЯ
+# =========================================================
+@brand RCEXL
+RCEXL ignition
+RCEXL CDI
+RCEXL fuel pump
+RCEXL топливный насос
+RCEXL зажигание
+RCEXL датчик Холла
+RCEXL Hall sensor
+RCEXL ignition DLE
+RCEXL ignition RCGF
+DSpower UAV servo
+DSpower throttle servo
+DSpower engine control servo
+DSpower cowl flap servo
+DS-W009A
+DS-W007
+DS-W008
+DS-W006
+DS-W009A UAV
+DS-W009A throttle
+AGFRC UAV servo
+AGFRC aircraft servo
+AGFRC throttle servo
+A80BHM V2
+A80BHMF V2
+A80BHMW V2
+A80BHMF V2 aircraft
+
+# =========================================================
+# РОССИЯ — ДВС / СИЛОВАЯ УСТАНОВКА
+# =========================================================
+ОДК двигатель БПЛА
+ОДК поршневой двигатель БПЛА
+Ростех двигатель БПЛА
+российский двигатель БПЛА
+отечественный двигатель БПЛА
+российский поршневой двигатель БПЛА
+российский бензиновый двигатель БПЛА
+двигатель БАС российского производства
+силовая установка БПЛА российская
+двигатель БПЛА 6 л с Россия
+двигатель БПЛА 13 л с Россия
+АПД-13
+АПД 13
+АПД-13 БПЛА
+АПД-13 двигатель
+АПД-13 купить
+АПД-13 цена
+АПД-13 топливный бак
+АПД-13 топливная система
+АПД-13 расход топлива
+АПД-13 топливный насос
+АПД-13 топливный фильтр
+АПД-13 система питания
+АПД-13 карбюратор
+АПД-13 зажигание
+М105 двигатель
+М105 авиационный двигатель
+М105 топливная система
+ТНЦ СО РАН двигатель БПЛА
+НПЦ БАС Томск двигатель БПЛА
+двигатель БПЛА 20 кВт Россия
+двигатель БПЛА 30 кВт Россия
+
+# =========================================================
+# РОССИЯ — СЕРВОПРИВОДЫ
+# =========================================================
+АИСТ ГРУПП сервопривод
+АИСТ сервопривод БПЛА
+сервопривод СП БПЛА
+российский сервопривод БПЛА
+СП-1 сервопривод
+СП-2 сервопривод
+СП-3 сервопривод
+СП-4 сервопривод
+СП-5 сервопривод
+СП-6 сервопривод
+СП-7 сервопривод
+СП-1 БПЛА
+СП-3 БПЛА
+СП-4 БПЛА
+СП-7 БПЛА
+ИнноДрайв
+ИнноДрайв сервопривод
+ХАРЗА сервопривод
+ХАРЗА-14
+ХАРЗА-20
+ХАРЗА-40
+ГРИЗОН сервопривод
+СОЛОНГОЙ сервоконтроллер
+
+# =========================================================
+# ОБЩИЕ МОСТЫ — ДВС -> ТОПЛИВНАЯ СИСТЕМА
+# =========================================================
+топливная система поршневого двигателя БПЛА
+топливная система бензинового БПЛА
+система питания двигателя БПЛА
+система питания ДВС БПЛА
+система подачи топлива БПЛА
+система подачи топлива авиационного двигателя
+топливоподача БПЛА
+топливная аппаратура БПЛА
+топливная аппаратура двигателя БПЛА
+топливный насос двигателя БПЛА
+электрический топливный насос БПЛА
+мембранный топливный насос БПЛА
+насос подкачки топлива БПЛА
+регулятор давления топлива БПЛА
+форсунка БПЛА
+инжектор БПЛА
+инжекторный двигатель БПЛА
+EFI БПЛА
+EFI UAV engine
+UAV EFI system
+UAV fuel injection
+UAV engine fuel pump
+UAV engine fuel system
+UAV engine fuel tank
+UAV engine fuel consumption
+UAV engine fuel line
+UAV engine fuel filter
+карбюратор БПЛА
+карбюратор двигателя БПЛА
+стартер генератор БПЛА
+стартер-генератор БПЛА
+integrated starter generator UAV
+ISG UAV engine
+электростартер БПЛА
+генератор двигателя БПЛА
+CDI БПЛА
+электронное зажигание БПЛА
+сервопривод дросселя БПЛА
+привод дросселя БПЛА
+throttle servo UAV
+engine control servo UAV
