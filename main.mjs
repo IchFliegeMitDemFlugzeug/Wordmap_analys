@@ -1,13 +1,14 @@
 import 'dotenv/config';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 import { addQuery, calculateRunStatus, getMeta, openDatabase, recoverProcessing, setMeta } from './src/db.mjs';
+import { ALGORITHM_VERSION } from './src/config.mjs';
 import { configureLogger, log } from './src/logger.mjs';
 import { generateReport } from './src/report.mjs';
 import { clusterSerp, expandBrands, parseInput, runResearch } from './src/research.mjs';
-import { scoreQuery } from './src/scoring.mjs';
+import { findResumableRun } from './src/run-version.mjs';
+import { classifyQuery } from './src/scoring.mjs';
 import { createSearchClient } from './src/yandex-search.mjs';
 import { createWordstatClient } from './src/yandex-wordstat.mjs';
 
@@ -21,17 +22,9 @@ async function main() {
   const hash = createHash('sha256').update(input).digest('hex');
   const root = 'results';
   mkdirSync(root, { recursive: true });
-  let runDir;
+  let runDir = findResumableRun(root, hash);
   let resumed = false;
-  for (const name of readdirSync(root).sort().reverse()) {
-    const file = path.join(root, name, 'research.sqlite');
-    if (!existsSync(file)) continue;
-    const probe = new Database(file, { readonly: true });
-    const same = probe.prepare("SELECT value FROM meta WHERE key='input_hash'").get()?.value === hash;
-    const status = probe.prepare("SELECT value FROM meta WHERE key='status'").get()?.value;
-    probe.close();
-    if (same && (!status || ['running', 'paused', 'incomplete'].includes(status))) { runDir = path.join(root, name); resumed = true; break; }
-  }
+  resumed = Boolean(runDir);
   if (!runDir) {
     const stamp = new Date().toISOString().replace(/[-:]/gu, '').replace('T', '_').slice(0, 15);
     runDir = path.join(root, stamp);
@@ -45,6 +38,7 @@ async function main() {
   configureLogger(path.join(runDir, 'logs', 'research.log'));
   const db = openDatabase(path.join(runDir, 'research.sqlite'));
   setMeta(db, 'input_hash', hash);
+  setMeta(db, 'algorithm_version', ALGORITHM_VERSION);
   setMeta(db, 'status', 'running');
   recoverProcessing(db);
   log('info', `Run ${resumed ? 'resume' : 'start'}: ${path.basename(runDir)}`);
@@ -62,9 +56,9 @@ async function main() {
   };
   process.once('SIGINT', stop);
   try {
-    const { seeds, brands } = parseInput(input);
-    for (const seed of seeds) addQuery(db, seed, { depth: 0, score: scoreQuery(seed, { brands, manualSeed: true }), manualSeed: true });
-    for (const seed of expandBrands(brands)) addQuery(db, seed, { depth: 0, score: scoreQuery(seed, { brands, manualSeed: true }), manualSeed: true, brandSeed: true });
+    const { seeds, brands, entities } = parseInput(input);
+    for (const seed of seeds) addQuery(db, seed, { depth: 0, ...classifyQuery(seed, { rootSeed: seed, brands, entities, manualSeed: true }), manualSeed: true });
+    for (const seed of expandBrands(brands)) addQuery(db, seed, { depth: 0, ...classifyQuery(seed, { rootSeed: seed, brands, entities, manualSeed: true }), manualSeed: true, brandSeed: true });
     const wordstat = createWordstatClient({ apiKey: process.env.YANDEX_API_KEY, folderId: process.env.YANDEX_FOLDER_ID, db });
     const search = createSearchClient({ apiKey: process.env.YANDEX_API_KEY, folderId: process.env.YANDEX_FOLDER_ID, db });
     let lastReportCount = db.prepare('SELECT COUNT(*) count FROM api_calls WHERE success=1').get().count;
@@ -72,7 +66,7 @@ async function main() {
       const count = db.prepare('SELECT COUNT(*) count FROM api_calls WHERE success=1').get().count;
       if (count >= lastReportCount + 25) { generateReport(db, runDir, { intermediate: true }); lastReportCount = count; }
     };
-    await runResearch({ db, client: { ...wordstat, search: search.search }, runDir, brands, generateReport: report });
+    await runResearch({ db, client: { ...wordstat, search: search.search }, runDir, brands, entities, generateReport: report });
     clusterSerp(db);
     const status = calculateRunStatus(db);
     setMeta(db, 'status', status);

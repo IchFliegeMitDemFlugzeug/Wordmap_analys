@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import Database from 'better-sqlite3';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { addQuery, openDatabase, quotaState, recoverProcessing } from '../src/db.mjs';
 
 test('schema, dedup and recovery', () => {
@@ -24,5 +28,39 @@ test('rolling quota counts every Wordstat attempt by started_at', () => {
   db.prepare('INSERT INTO api_calls(api,started_at) VALUES(?,?)').run('search', new Date(now - 1_000).toISOString());
   assert.equal(quotaState(db, now).count, 95);
   assert.ok(quotaState(db, now).waitMs > 0);
+  db.close();
+});
+
+test('opening a legacy database adds relevance columns idempotently', () => {
+  const filename = join(mkdtempSync(join(tmpdir(), 'wordmap-migration-')), 'legacy.sqlite');
+  const legacy = new Database(filename);
+  legacy.exec("CREATE TABLE queries (id INTEGER PRIMARY KEY, query TEXT NOT NULL, normalized TEXT NOT NULL UNIQUE, depth INTEGER NOT NULL, score INTEGER NOT NULL, manual_seed INTEGER NOT NULL DEFAULT 0, brand_seed INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'queued', root_seed TEXT, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL)");
+  legacy.close();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const db = openDatabase(filename);
+    const columns = new Set(db.prepare('PRAGMA table_info(queries)').all().map((column) => column.name));
+    for (const name of ['relevance_class', 'relevance_reason', 'recursive_eligible', 'deep_eligible', 'expansion_status', 'skip_reason']) assert.ok(columns.has(name));
+    db.close();
+  }
+});
+
+test('deduplication preserves or promotes one internally consistent relevance decision', () => {
+  const db = openDatabase(':memory:');
+  addQuery(db, 'same query', { relevanceClass: 'core', reasons: ['core first'], recursiveEligible: true, deepEligible: true });
+  addQuery(db, 'same query', { relevanceClass: 'noise', reasons: ['noise later'], recursiveEligible: false, deepEligible: false });
+  let row = db.prepare("SELECT relevance_class,relevance_reason,recursive_eligible,deep_eligible FROM queries WHERE normalized='same query'").get();
+  assert.deepEqual(row, { relevance_class: 'core', relevance_reason: '["core first"]', recursive_eligible: 1, deep_eligible: 1 });
+  addQuery(db, 'another query', { relevanceClass: 'noise', reasons: ['noise first'], recursiveEligible: false, deepEligible: false });
+  addQuery(db, 'another query', { relevanceClass: 'adjacent', reasons: ['adjacent later'], recursiveEligible: true, deepEligible: true });
+  row = db.prepare("SELECT relevance_class,relevance_reason,recursive_eligible,deep_eligible FROM queries WHERE normalized='another query'").get();
+  assert.deepEqual(row, { relevance_class: 'adjacent', relevance_reason: '["adjacent later"]', recursive_eligible: 1, deep_eligible: 1 });
+  addQuery(db, 'forward order', { relevanceClass: 'core', reasons: ['not recursive'], recursiveEligible: false, deepEligible: true });
+  addQuery(db, 'forward order', { relevanceClass: 'core', reasons: ['recursive'], recursiveEligible: true, deepEligible: true });
+  addQuery(db, 'reverse order', { relevanceClass: 'core', reasons: ['recursive'], recursiveEligible: true, deepEligible: true });
+  addQuery(db, 'reverse order', { relevanceClass: 'core', reasons: ['not recursive'], recursiveEligible: false, deepEligible: true });
+  for (const normalized of ['forward order', 'reverse order']) {
+    row = db.prepare('SELECT relevance_class,relevance_reason,recursive_eligible,deep_eligible FROM queries WHERE normalized=?').get(normalized);
+    assert.deepEqual(row, { relevance_class: 'core', relevance_reason: '["recursive"]', recursive_eligible: 1, deep_eligible: 1 });
+  }
   db.close();
 });
