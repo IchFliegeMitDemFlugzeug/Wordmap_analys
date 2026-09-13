@@ -112,23 +112,33 @@ export async function runResearch({ db, client, runDir, brands = [], entities = 
         candidates.push({ id: child.id, type: item.type, count: item.count, ...relevance });
       }
       for (const child of selectRecursiveChildren(candidates)) {
+        const existingRootDecision = db.prepare('SELECT decision FROM root_expansions WHERE root_seed=? AND query_id=?').get(parent.root_seed, child.id);
+        if (existingRootDecision) continue;
         if (parent.depth + 1 > MAX_DEPTH) {
+          db.prepare("INSERT INTO root_expansions VALUES(?,?, 'skipped_depth', ?)").run(parent.root_seed, child.id, new Date().toISOString());
           db.prepare("UPDATE queries SET expansion_status='skipped_depth',skip_reason='depth' WHERE id=? AND status='stored'").run(child.id);
           continue;
         }
-        const globalUsed = db.prepare("SELECT COUNT(*) count FROM queries WHERE manual_seed=0 AND expansion_status IN ('queued','expanded')").get().count;
-        if (globalUsed >= MAX_AUTO_EXPANSIONS_PER_RUN) {
-          db.prepare("UPDATE queries SET expansion_status='skipped_global_budget',skip_reason='global_budget' WHERE id=? AND status='stored'").run(child.id);
-          continue;
-        }
-        const rootUsed = db.prepare("SELECT COUNT(*) count FROM queries WHERE manual_seed=0 AND root_seed=? AND expansion_status IN ('queued','expanded')").get(parent.root_seed).count;
+        const rootUsed = db.prepare("SELECT COUNT(*) count FROM root_expansions WHERE root_seed=? AND decision IN ('queued','expanded')").get(parent.root_seed).count;
         if (rootUsed >= MAX_AUTO_EXPANSIONS_PER_ROOT) {
+          db.prepare("INSERT INTO root_expansions VALUES(?,?, 'skipped_root_budget', ?)").run(parent.root_seed, child.id, new Date().toISOString());
           db.prepare("UPDATE queries SET expansion_status='skipped_root_budget',skip_reason='root_budget' WHERE id=? AND status='stored'").run(child.id);
           continue;
         }
+        const childState = db.prepare('SELECT status FROM queries WHERE id=?').get(child.id).status;
+        const alreadyScheduled = childState !== 'stored';
+        const globalUsed = db.prepare("SELECT COUNT(*) count FROM queries WHERE manual_seed=0 AND expansion_status IN ('queued','expanded')").get().count;
+        if (!alreadyScheduled && globalUsed >= MAX_AUTO_EXPANSIONS_PER_RUN) {
+          db.prepare("INSERT INTO root_expansions VALUES(?,?, 'skipped_global_budget', ?)").run(parent.root_seed, child.id, new Date().toISOString());
+          db.prepare("UPDATE queries SET expansion_status='skipped_global_budget',skip_reason='global_budget' WHERE id=? AND status='stored'").run(child.id);
+          continue;
+        }
+        const rootDecision = childState === 'done' ? 'expanded' : 'queued';
+        db.prepare('INSERT INTO root_expansions VALUES(?,?,?,?)').run(parent.root_seed, child.id, rootDecision, new Date().toISOString());
         db.prepare("UPDATE queries SET status='queued',expansion_status='queued',skip_reason=NULL WHERE id=? AND status='stored'").run(child.id);
       }
       db.prepare("UPDATE queries SET status='done',expansion_status='expanded' WHERE id=?").run(parent.id);
+      db.prepare("UPDATE root_expansions SET decision='expanded' WHERE query_id=? AND decision='queued'").run(parent.id);
       log('info', `Query discovery completed: ${parent.id} «${parent.query}»`);
       await generateReport?.();
     } catch (error) {

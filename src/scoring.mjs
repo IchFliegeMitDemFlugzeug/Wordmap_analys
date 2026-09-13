@@ -10,6 +10,14 @@ const SAFE_PREFIXES = Object.freeze({
   commercial: ['производител'],
   product: ['топливозабор', 'горловин', 'дренаж', 'быстросъем', 'противоотлив', 'перекач'],
 });
+const COMPONENT_FAMILIES = Object.freeze({
+  filter: ['фильтр', 'фильтры', 'фильтра', 'фильтров'],
+  pump: ['насос', 'насосы', 'насоса', 'насосов'],
+  hose: ['шланг', 'шланги', 'шланга', 'шлангов'],
+  tube: ['трубка', 'трубки', 'трубок'],
+  valve: ['клапан', 'клапаны', 'клапана', 'клапанов'],
+});
+const COMPONENT_FORMS = Object.freeze(Object.values(COMPONENT_FAMILIES).flat());
 const GENERIC_ANCHORS = new Set(['купить', 'цена', 'заказать', 'заказ', 'изготовление', 'производство', 'производитель', 'поставщик', 'продажа', 'топливный', 'топливная', 'топливные', 'fuel', 'фильтр', 'насос', 'шланг', 'трубка', 'бак', 'бака', 'баков', 'tank', 'system', 'система', 'системы', 'для']);
 const TECHNICAL = new Set([...PRODUCT, 'autopilot', 'автопилот', 'motor', 'engine', 'двигатель', 'двигателя', 'компонент', 'система', 'системы']);
 
@@ -60,8 +68,8 @@ function semanticSignals(query, context = {}) {
   const domain = matcher.hasAnyToken(HIGH_DOMAIN) || matcher.hasAllowedPrefix(SAFE_PREFIXES.domain);
   const fuel = matcher.hasToken('fuel') || matcher.hasAllowedPrefix(SAFE_PREFIXES.fuel);
   const tank = matcher.hasAnyToken(['бак', 'бака', 'баки', 'баков', 'tank', 'tanks', 'bladder']);
-  const accessory = matcher.hasAnyToken(['фильтр', 'насос', 'шланг', 'трубка', 'горловина', 'fitting', 'filter', 'pump', 'hose', 'tubing']) || matcher.hasAllowedPrefix(SAFE_PREFIXES.product);
-  const product = matcher.hasAnyToken(PRODUCT) || matcher.hasAllowedPrefix(SAFE_PREFIXES.product) || fuel;
+  const accessory = matcher.hasAnyToken([...COMPONENT_FORMS, 'горловина', 'fitting', 'filter', 'pump', 'hose', 'tubing']) || matcher.hasAllowedPrefix(SAFE_PREFIXES.product);
+  const product = accessory || matcher.hasAnyToken(PRODUCT) || matcher.hasAllowedPrefix(SAFE_PREFIXES.product) || fuel;
   const technical = matcher.tokens.some((token) => TECHNICAL.has(token)) || product;
   const isMeaningfulAnchor = (token, minimumLength) => !GENERIC_ANCHORS.has(token) && !token.startsWith('топливн') && token.length >= minimumLength;
   const meaningfulRoot = new Set(root.tokens.filter((token) => isMeaningfulAnchor(token, 3)));

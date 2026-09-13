@@ -56,3 +56,33 @@ test('global expansion budget prevents another automatic Wordstat call', async (
   assert.equal(db.prepare("SELECT expansion_status FROM queries WHERE query='UAV fuel tank freshmodel'").get().expansion_status, 'skipped_global_budget');
   db.close();
 });
+
+test('per-root budgets account for a deduplicated child independently for both roots', async () => {
+  const db = openDatabase(':memory:');
+  const roots = ['alpha UAV fuel tank', 'beta UAV fuel tank'];
+  for (const root of roots) addQuery(db, root, { manualSeed: true, rootSeed: root, ...classifyQuery(root, { rootSeed: root, manualSeed: true }) });
+  const calls = [];
+  const client = {
+    getRegionsTree: async () => ({ regions: [] }),
+    getTopRequests: async (query) => {
+      calls.push(query);
+      const rootIndex = roots.indexOf(query);
+      if (rootIndex < 0) return { totalCount: 0, results: [], associations: [], raw: {} };
+      const results = [{ phrase: 'shared UAV fuel tank', count: 100 }];
+      for (let index = 0; index < 8; index += 1) results.push({ phrase: `root${rootIndex} UAV fuel tank unique${index}`, count: 90 - index });
+      return { totalCount: 1, results, associations: [], raw: {} };
+    },
+    getDynamics: async () => ({ results: [] }),
+    getRegionsDistribution: async () => ({ results: [] }),
+    search: async () => ({ results: [], rawXml: '<response/>' }),
+  };
+  await runResearch({ db, client, runDir: runDirectory() });
+  const sharedId = db.prepare("SELECT id FROM queries WHERE normalized='shared uav fuel tank'").get().id;
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM root_expansions WHERE query_id=?').get(sharedId).count, 2);
+  for (const root of roots) {
+    assert.equal(db.prepare("SELECT COUNT(*) count FROM root_expansions WHERE root_seed=? AND decision='expanded'").get(root).count, 8);
+    assert.equal(db.prepare("SELECT COUNT(*) count FROM root_expansions WHERE root_seed=? AND decision='skipped_root_budget'").get(root).count, 1);
+  }
+  assert.equal(calls.length, 17);
+  db.close();
+});

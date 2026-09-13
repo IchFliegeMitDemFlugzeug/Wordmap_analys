@@ -48,6 +48,12 @@ test('fuel/UAV engineering queries remain eligible', () => {
     assert.equal(result.relevanceClass, 'adjacent', query);
     assert.equal(result.recursiveEligible, true, query);
   }
+  for (const query of ['фильтры для БПЛА', 'насосы БПЛА', 'шланги для дронов', 'трубки БПЛА', 'клапаны для дронов']) {
+    const result = classifyQuery(query, fuelContext);
+    assert.equal(result.relevanceClass, 'adjacent', query);
+    assert.equal(result.recursiveEligible, true, query);
+    assert.equal(result.deepEligible, true, query);
+  }
 });
 
 test('configured entities and equipment models are strong contextual anchors', () => {

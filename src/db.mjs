@@ -24,7 +24,15 @@ CREATE TABLE IF NOT EXISTS analysis_status (
   serp_status TEXT NOT NULL DEFAULT 'pending',
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS root_expansions (
+  root_seed TEXT NOT NULL,
+  query_id INTEGER NOT NULL REFERENCES queries(id),
+  decision TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(root_seed,query_id)
+);
 CREATE INDEX IF NOT EXISTS idx_queries_queue ON queries(status,manual_seed DESC,score DESC,depth,id);
+CREATE INDEX IF NOT EXISTS idx_root_expansions_budget ON root_expansions(root_seed,decision);
 CREATE INDEX IF NOT EXISTS idx_serp_url ON serp(normalized_url);
 `);
   // ALTER TABLE is deliberately idempotent, allowing old result databases to remain readable.
