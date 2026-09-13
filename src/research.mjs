@@ -1,22 +1,25 @@
 import { writeFileSync } from 'node:fs';
 import { addQuery, setMeta } from './db.mjs';
+import { MAX_AUTO_DEEP_QUERIES, MAX_AUTO_EXPANSIONS_PER_ROOT, MAX_AUTO_EXPANSIONS_PER_RUN, MAX_DEPTH } from './config.mjs';
 import { log } from './logger.mjs';
-import { normalizeUrl, scoreQuery } from './scoring.mjs';
+import { classifyQuery, normalizeUrl } from './scoring.mjs';
 import { alignDates, formatDate } from './vendor/yandex/wordstat-dates.mjs';
 
-export const MAX_DEPTH = 2;
+export { MAX_DEPTH } from './config.mjs';
 export const BRAND_TERMS = ['', 'fuel tank', 'fuel fitting', 'fuel clunk', 'fuel filter', 'fuel valve', 'fuel tubing', 'топливный бак', 'штуцер', 'топливный штуцер', 'топливный фильтр', 'топливный клапан', 'топливная трубка'];
 
 export function parseInput(text) {
   const seeds = [];
   const brands = [];
+  const explicitEntities = [];
   for (const raw of text.split(/\r?\n/u)) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
     if (/^@brand\s+/iu.test(line)) brands.push(line.replace(/^@brand\s+/iu, '').trim());
+    else if (/^@entity\s+/iu.test(line)) explicitEntities.push(line.replace(/^@entity\s+/iu, '').trim());
     else seeds.push(line);
   }
-  return { seeds, brands };
+  return { seeds, brands, entities: [...new Set([...brands, ...explicitEntities])] };
 }
 
 export function expandBrands(brands) {
@@ -24,11 +27,9 @@ export function expandBrands(brands) {
 }
 
 export function selectRecursiveChildren(children) {
-  const sort = (a, b) => b.score - a.score || b.count - a.count;
-  return [
-    ...children.filter((item) => item.type === 'DIRECT' && item.score >= 3).sort(sort).slice(0, 100),
-    ...children.filter((item) => item.type === 'ASSOCIATION' && item.score >= 5).sort(sort).slice(0, 20),
-  ];
+  const rank = { core: 0, adjacent: 1 };
+  return children.filter((item) => item.recursiveEligible).sort((a, b) =>
+    rank[a.relevanceClass] - rank[b.relevanceClass] || b.score - a.score || b.count - a.count);
 }
 
 export function getLast24CompletedMonths(now = new Date()) {
@@ -87,7 +88,7 @@ async function runStage({ db, q, stage, execute, save, generateReport }) {
   }
 }
 
-export async function runResearch({ db, client, runDir, brands, generateReport }) {
+export async function runResearch({ db, client, runDir, brands = [], entities = brands, generateReport }) {
   const tree = await client.getRegionsTree();
   setMeta(db, 'regions_tree', JSON.stringify(tree.regions));
   for (;;) {
@@ -104,15 +105,30 @@ export async function runResearch({ db, client, runDir, brands, generateReport }
       const candidates = [];
       for (const item of all) {
         if (!item.phrase) continue;
-        const score = scoreQuery(item.phrase, { brands });
-        const child = addQuery(db, item.phrase, { depth: parent.depth + 1, score, status: 'stored', rootSeed: parent.root_seed });
+        const relevance = classifyQuery(item.phrase, { parentQuery: parent.query, rootSeed: parent.root_seed, brands, entities, depth: parent.depth + 1, relationType: item.type });
+        const initialExpansion = relevance.recursiveEligible ? 'candidate' : 'skipped_relevance';
+        const child = addQuery(db, item.phrase, { depth: parent.depth + 1, ...relevance, status: 'stored', rootSeed: parent.root_seed, expansionStatus: initialExpansion, skipReason: relevance.recursiveEligible ? null : 'relevance' });
         db.prepare('INSERT OR REPLACE INTO relations VALUES(?,?,?,?,?)').run(parent.id, child.id, item.type, item.count, new Date().toISOString());
-        candidates.push({ id: child.id, type: item.type, score, count: item.count });
+        candidates.push({ id: child.id, type: item.type, count: item.count, ...relevance });
       }
       for (const child of selectRecursiveChildren(candidates)) {
-        if (parent.depth + 1 <= MAX_DEPTH) db.prepare("UPDATE queries SET status='queued' WHERE id=? AND status='stored'").run(child.id);
+        if (parent.depth + 1 > MAX_DEPTH) {
+          db.prepare("UPDATE queries SET expansion_status='skipped_depth',skip_reason='depth' WHERE id=? AND status='stored'").run(child.id);
+          continue;
+        }
+        const globalUsed = db.prepare("SELECT COUNT(*) count FROM queries WHERE manual_seed=0 AND expansion_status IN ('queued','expanded')").get().count;
+        if (globalUsed >= MAX_AUTO_EXPANSIONS_PER_RUN) {
+          db.prepare("UPDATE queries SET expansion_status='skipped_global_budget',skip_reason='global_budget' WHERE id=? AND status='stored'").run(child.id);
+          continue;
+        }
+        const rootUsed = db.prepare("SELECT COUNT(*) count FROM queries WHERE manual_seed=0 AND root_seed=? AND expansion_status IN ('queued','expanded')").get(parent.root_seed).count;
+        if (rootUsed >= MAX_AUTO_EXPANSIONS_PER_ROOT) {
+          db.prepare("UPDATE queries SET expansion_status='skipped_root_budget',skip_reason='root_budget' WHERE id=? AND status='stored'").run(child.id);
+          continue;
+        }
+        db.prepare("UPDATE queries SET status='queued',expansion_status='queued',skip_reason=NULL WHERE id=? AND status='stored'").run(child.id);
       }
-      db.prepare("UPDATE queries SET status='done' WHERE id=?").run(parent.id);
+      db.prepare("UPDATE queries SET status='done',expansion_status='expanded' WHERE id=?").run(parent.id);
       log('info', `Query discovery completed: ${parent.id} «${parent.query}»`);
       await generateReport?.();
     } catch (error) {
@@ -128,8 +144,13 @@ export async function runResearch({ db, client, runDir, brands, generateReport }
   }
 
   const timestamp = new Date().toISOString();
-  db.prepare(`INSERT OR IGNORE INTO analysis_status(query_id,updated_at)
-    SELECT id,? FROM queries WHERE manual_seed=1 OR score>=6`).run(timestamp);
+  db.prepare('INSERT OR IGNORE INTO analysis_status(query_id,updated_at) SELECT id,? FROM queries WHERE manual_seed=1').run(timestamp);
+  const autoDeep = db.prepare(`SELECT q.id FROM queries q LEFT JOIN wordstat_top w ON w.query_id=q.id
+    WHERE q.manual_seed=0 AND q.deep_eligible=1 AND q.relevance_class IN ('core','adjacent')
+    ORDER BY CASE q.relevance_class WHEN 'core' THEN 0 ELSE 1 END,q.score DESC,
+      COALESCE(w.total_count,(SELECT MAX(r.count) FROM relations r WHERE r.child_query_id=q.id),0) DESC,q.id LIMIT ?`).all(MAX_AUTO_DEEP_QUERIES);
+  const insertDeep = db.prepare('INSERT OR IGNORE INTO analysis_status(query_id,updated_at) VALUES(?,?)');
+  for (const item of autoDeep) insertDeep.run(item.id, timestamp);
   const dates = getLast24CompletedMonths();
   const deep = db.prepare(`SELECT q.*,a.dynamics_status,a.regions_status,a.serp_status FROM queries q
     JOIN analysis_status a ON a.query_id=q.id ORDER BY q.id`).all();

@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import Database from 'better-sqlite3';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { addQuery, openDatabase, quotaState, recoverProcessing } from '../src/db.mjs';
 
 test('schema, dedup and recovery', () => {
@@ -25,4 +29,17 @@ test('rolling quota counts every Wordstat attempt by started_at', () => {
   assert.equal(quotaState(db, now).count, 95);
   assert.ok(quotaState(db, now).waitMs > 0);
   db.close();
+});
+
+test('opening a legacy database adds relevance columns idempotently', () => {
+  const filename = join(mkdtempSync(join(tmpdir(), 'wordmap-migration-')), 'legacy.sqlite');
+  const legacy = new Database(filename);
+  legacy.exec("CREATE TABLE queries (id INTEGER PRIMARY KEY, query TEXT NOT NULL, normalized TEXT NOT NULL UNIQUE, depth INTEGER NOT NULL, score INTEGER NOT NULL, manual_seed INTEGER NOT NULL DEFAULT 0, brand_seed INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'queued', root_seed TEXT, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL)");
+  legacy.close();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const db = openDatabase(filename);
+    const columns = new Set(db.prepare('PRAGMA table_info(queries)').all().map((column) => column.name));
+    for (const name of ['relevance_class', 'relevance_reason', 'recursive_eligible', 'deep_eligible', 'expansion_status', 'skip_reason']) assert.ok(columns.has(name));
+    db.close();
+  }
 });
