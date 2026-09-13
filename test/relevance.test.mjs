@@ -27,8 +27,20 @@ test('semantic drift is noise or non-recursive', () => {
   }
 });
 
+test('negative vehicle tokens always override otherwise strong product signals', () => {
+  for (const query of ['топливный бак ВАЗ', 'топливный бак КамАЗ']) {
+    const result = classifyQuery(query, fuelContext);
+    assert.equal(result.relevanceClass, 'noise', query);
+    assert.equal(result.recursiveEligible, false, query);
+    assert.equal(result.deepEligible, false, query);
+  }
+  const unrelatedModel = classifyQuery('редукционный клапан топливный 4hk1 купить', { rootSeed: 'мягкий бак БПЛА' });
+  assert.equal(unrelatedModel.recursiveEligible, false);
+  assert.equal(unrelatedModel.deepEligible, false);
+});
+
 test('fuel/UAV engineering queries remain eligible', () => {
-  for (const query of ['мягкий топливный бак', 'авиационный мягкий топливный бак', 'топливный бак БПЛА', 'UAV fuel tank']) {
+  for (const query of ['мягкий топливный бак', 'авиационный мягкий топливный бак', 'топливный бак БПЛА', 'UAV fuel tank', 'мягкие топливные баки для БПЛА', 'UAV fuel tanks', 'топливные баки для дронов']) {
     assert.equal(classifyQuery(query, fuelContext).relevanceClass, 'core', query);
   }
   for (const query of ['топливный фильтр БПЛА', 'насос топливной системы БПЛА']) {

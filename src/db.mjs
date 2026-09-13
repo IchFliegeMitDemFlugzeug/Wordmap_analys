@@ -56,14 +56,18 @@ export function getMeta(db, key) {
 export function addQuery(db, query, data = {}) {
   const now = new Date().toISOString();
   const normalized = normalizeQuery(query);
+  const existingRank = "CASE queries.relevance_class WHEN 'core' THEN 4 WHEN 'adjacent' THEN 3 WHEN 'broad' THEN 2 ELSE 1 END";
+  const incomingRank = "CASE excluded.relevance_class WHEN 'core' THEN 4 WHEN 'adjacent' THEN 3 WHEN 'broad' THEN 2 ELSE 1 END";
+  const useIncoming = `queries.manual_seed=0 AND (excluded.manual_seed=1 OR ${incomingRank}>${existingRank})`;
   db.prepare(`INSERT INTO queries(query,normalized,depth,score,manual_seed,brand_seed,status,root_seed,first_seen_at,last_seen_at,relevance_class,relevance_reason,recursive_eligible,deep_eligible,expansion_status,skip_reason)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(normalized) DO UPDATE SET last_seen_at=excluded.last_seen_at,
       manual_seed=MAX(manual_seed,excluded.manual_seed), brand_seed=MAX(brand_seed,excluded.brand_seed),
       score=MAX(score,excluded.score), depth=MIN(depth,excluded.depth),
-      relevance_class=CASE WHEN queries.manual_seed=1 THEN queries.relevance_class ELSE excluded.relevance_class END,
-      relevance_reason=CASE WHEN queries.manual_seed=1 THEN queries.relevance_reason ELSE excluded.relevance_reason END,
-      recursive_eligible=MAX(recursive_eligible,excluded.recursive_eligible),deep_eligible=MAX(deep_eligible,excluded.deep_eligible)`).run(
+      relevance_class=CASE WHEN ${useIncoming} THEN excluded.relevance_class ELSE queries.relevance_class END,
+      relevance_reason=CASE WHEN ${useIncoming} THEN excluded.relevance_reason ELSE queries.relevance_reason END,
+      recursive_eligible=CASE WHEN ${useIncoming} THEN excluded.recursive_eligible ELSE queries.recursive_eligible END,
+      deep_eligible=CASE WHEN ${useIncoming} THEN excluded.deep_eligible ELSE queries.deep_eligible END`).run(
     query, normalized, data.depth ?? 0, data.score ?? 0, data.manualSeed ? 1 : 0,
     data.brandSeed ? 1 : 0, data.status ?? 'queued', data.rootSeed ?? query, now, now,
     data.relevanceClass ?? (data.manualSeed ? 'core' : 'broad'), JSON.stringify(data.reasons ?? []),

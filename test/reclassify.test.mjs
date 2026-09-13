@@ -1,0 +1,38 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ALGORITHM_VERSION } from '../src/config.mjs';
+import { addQuery, getMeta, openDatabase } from '../src/db.mjs';
+import { reclassifyRun } from '../src/reclassify-run.mjs';
+
+test('offline reclassification changes only decisions and creates reports without API clients', () => {
+  const runDir = mkdtempSync(join(tmpdir(), 'wordmap-reclassify-'));
+  mkdirSync(join(runDir, 'raw'));
+  writeFileSync(join(runDir, 'input.txt'), '@entity DLE130G\nтопливный бак БПЛА\n');
+  const databaseFile = join(runDir, 'research.sqlite');
+  let db = openDatabase(databaseFile);
+  const parent = addQuery(db, 'DLE130G engine', { manualSeed: true, status: 'done' });
+  const relevant = addQuery(db, 'DLE130G fuel system', { status: 'stored', relevanceClass: 'noise' });
+  const noise = addQuery(db, 'топливный бак ВАЗ', { status: 'stored', relevanceClass: 'core', recursiveEligible: true, deepEligible: true });
+  db.prepare('INSERT INTO relations VALUES(?,?,?,?,?)').run(parent.id, relevant.id, 'DIRECT', 20, new Date().toISOString());
+  db.prepare('INSERT INTO relations VALUES(?,?,?,?,?)').run(parent.id, noise.id, 'ASSOCIATION', 10, new Date().toISOString());
+  db.prepare('INSERT INTO api_calls(api,method,success,started_at) VALUES(?,?,?,?)').run('wordstat', 'getTopRequests', 1, new Date().toISOString());
+  const before = Object.fromEntries(['queries', 'relations', 'api_calls', 'wordstat_top', 'dynamics', 'regions', 'serp'].map((table) => [table, db.prepare(`SELECT COUNT(*) count FROM ${table}`).get().count]));
+  db.close();
+  reclassifyRun(runDir);
+  assert.ok(existsSync(join(runDir, 'research.before-reclassify.sqlite')));
+  const originalBackup = readFileSync(join(runDir, 'research.before-reclassify.sqlite'));
+  reclassifyRun(runDir);
+  assert.deepEqual(readFileSync(join(runDir, 'research.before-reclassify.sqlite')), originalBackup);
+  assert.ok(existsSync(join(runDir, 'queries.csv')));
+  assert.match(readFileSync(join(runDir, 'report.html'), 'utf8'), /ADJACENT/u);
+  db = openDatabase(databaseFile);
+  const after = Object.fromEntries(Object.keys(before).map((table) => [table, db.prepare(`SELECT COUNT(*) count FROM ${table}`).get().count]));
+  assert.deepEqual(after, before);
+  assert.equal(getMeta(db, 'algorithm_version'), String(ALGORITHM_VERSION));
+  assert.deepEqual(db.prepare('SELECT relevance_class,recursive_eligible,deep_eligible,status FROM queries WHERE id=?').get(relevant.id), { relevance_class: 'adjacent', recursive_eligible: 1, deep_eligible: 1, status: 'stored' });
+  assert.deepEqual(db.prepare('SELECT relevance_class,recursive_eligible,deep_eligible,status FROM queries WHERE id=?').get(noise.id), { relevance_class: 'noise', recursive_eligible: 0, deep_eligible: 0, status: 'stored' });
+  db.close();
+});

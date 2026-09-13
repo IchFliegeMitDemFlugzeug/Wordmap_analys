@@ -43,3 +43,16 @@ test('opening a legacy database adds relevance columns idempotently', () => {
     db.close();
   }
 });
+
+test('deduplication preserves or promotes one internally consistent relevance decision', () => {
+  const db = openDatabase(':memory:');
+  addQuery(db, 'same query', { relevanceClass: 'core', reasons: ['core first'], recursiveEligible: true, deepEligible: true });
+  addQuery(db, 'same query', { relevanceClass: 'noise', reasons: ['noise later'], recursiveEligible: false, deepEligible: false });
+  let row = db.prepare("SELECT relevance_class,relevance_reason,recursive_eligible,deep_eligible FROM queries WHERE normalized='same query'").get();
+  assert.deepEqual(row, { relevance_class: 'core', relevance_reason: '["core first"]', recursive_eligible: 1, deep_eligible: 1 });
+  addQuery(db, 'another query', { relevanceClass: 'noise', reasons: ['noise first'], recursiveEligible: false, deepEligible: false });
+  addQuery(db, 'another query', { relevanceClass: 'adjacent', reasons: ['adjacent later'], recursiveEligible: true, deepEligible: true });
+  row = db.prepare("SELECT relevance_class,relevance_reason,recursive_eligible,deep_eligible FROM queries WHERE normalized='another query'").get();
+  assert.deepEqual(row, { relevance_class: 'adjacent', relevance_reason: '["adjacent later"]', recursive_eligible: 1, deep_eligible: 1 });
+  db.close();
+});
