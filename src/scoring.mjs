@@ -2,7 +2,7 @@
 export const HIGH_DOMAIN = ['бпла', 'бла', 'бвс', 'бас', 'дрон', 'дроны', 'дронов', 'самолет', 'самолеты', 'вертолет', 'вертолеты', 'авиация', 'aircraft', 'uav', 'drone'];
 export const PRODUCT = ['бак', 'бака', 'баки', 'баков', 'штуцер', 'фитинг', 'фильтр', 'клапан', 'трубка', 'шланг', 'датчик', 'насос', 'fuel', 'tank', 'tanks', 'bladder', 'fitting', 'clunk', 'valve', 'vent', 'hose', 'tubing', 'pump'];
 export const COMMERCIAL = ['купить', 'цена', 'заказать', 'заказ', 'изготовление', 'производитель', 'производство', 'поставщик', 'продажа'];
-export const NEGATIVE = ['ваз', 'лада', 'камаз', 'газель', 'уаз', 'трактор', 'мотоблок', 'бензопила', 'триммер', 'мотоцикл'];
+export const NEGATIVE = ['ваз', 'ваза', 'лада', 'лады', 'камаз', 'камаза', 'камазы', 'камазов', 'газель', 'газели', 'уаз', 'уаза', 'трактор', 'трактора', 'тракторы', 'тракторов', 'мотоблок', 'мотоблока', 'мотоблоки', 'мотоблоков', 'бензопила', 'бензопилы', 'триммер', 'триммера', 'триммеры', 'триммеров', 'мотоцикл', 'мотоцикла', 'мотоциклы', 'мотоциклов'];
 
 const SAFE_PREFIXES = Object.freeze({
   domain: ['беспилотн', 'авиационн', 'авиамодел', 'радиомодел'],
@@ -18,7 +18,8 @@ const COMPONENT_FAMILIES = Object.freeze({
   valve: ['клапан', 'клапаны', 'клапана', 'клапанов'],
 });
 const COMPONENT_FORMS = Object.freeze(Object.values(COMPONENT_FAMILIES).flat());
-const GENERIC_ANCHORS = new Set(['купить', 'цена', 'заказать', 'заказ', 'изготовление', 'производство', 'производитель', 'поставщик', 'продажа', 'топливный', 'топливная', 'топливные', 'fuel', 'фильтр', 'насос', 'шланг', 'трубка', 'бак', 'бака', 'баков', 'tank', 'system', 'система', 'системы', 'для']);
+const GENERIC_ANCHORS = new Set([...PRODUCT, ...COMPONENT_FORMS, ...COMMERCIAL, 'filter', 'system', 'systems', 'система', 'системы', 'компонент', 'компоненты', 'для']);
+const HARD_NEGATIVE = Object.freeze(['toyota', 'тойота', 'hyundai', 'хендай', 'kia', 'киа', 'renault', 'рено', 'nissan', 'ниссан', 'volkswagen', 'фольксваген', 'bmw', 'mercedes', 'мерседес', 'ford', 'форд', 'chevrolet', 'шевроле', 'skoda', 'шкода', 'audi', 'ауди', 'webasto', 'вебасто']);
 const TECHNICAL = new Set([...PRODUCT, 'autopilot', 'автопилот', 'motor', 'engine', 'двигатель', 'двигателя', 'компонент', 'система', 'системы']);
 
 export function normalizeQuery(value) {
@@ -71,14 +72,15 @@ function semanticSignals(query, context = {}) {
   const accessory = matcher.hasAnyToken([...COMPONENT_FORMS, 'горловина', 'fitting', 'filter', 'pump', 'hose', 'tubing']) || matcher.hasAllowedPrefix(SAFE_PREFIXES.product);
   const product = accessory || matcher.hasAnyToken(PRODUCT) || matcher.hasAllowedPrefix(SAFE_PREFIXES.product) || fuel;
   const technical = matcher.tokens.some((token) => TECHNICAL.has(token)) || product;
-  const isMeaningfulAnchor = (token, minimumLength) => !GENERIC_ANCHORS.has(token) && !token.startsWith('топливн') && token.length >= minimumLength;
+  const genericPrefixes = [...SAFE_PREFIXES.fuel, ...SAFE_PREFIXES.product, ...SAFE_PREFIXES.commercial];
+  const isMeaningfulAnchor = (token, minimumLength) => !GENERIC_ANCHORS.has(token) && !genericPrefixes.some((prefix) => token.startsWith(prefix)) && token.length >= minimumLength;
   const meaningfulRoot = new Set(root.tokens.filter((token) => isMeaningfulAnchor(token, 3)));
   const meaningfulParent = new Set(parent.tokens.filter((token) => isMeaningfulAnchor(token, 4)));
   const rootOverlap = matcher.tokens.filter((token) => meaningfulRoot.has(token));
   const parentOverlap = matcher.tokens.filter((token) => meaningfulParent.has(token));
   const model = matcher.tokens.some((token) => /(?=.*\p{L})(?=.*\p{N})/u.test(token) && token.length >= 3);
   const negative = matcher.hasAnyToken(NEGATIVE);
-  const hardNoise = matcher.hasAnyToken(['авиабилет', 'авиабилеты', 'билет', 'билеты', 'автобус', 'рейс', 'webasto', 'вебасто', 'bestway', 'intex', 'toyota']) ||
+  const hardNoise = matcher.hasAnyToken(['авиабилет', 'авиабилеты', 'билет', 'билеты', 'автобус', 'рейс', 'bestway', 'intex', ...HARD_NEGATIVE]) ||
     matcher.hasAllowedPrefix(['бассейн', 'автомобил', 'антидрон']);
   const entity = matchedEntities.length > 0;
   const modelContext = entity || domain || rootOverlap.length > 0;

@@ -3,6 +3,30 @@
 # Только Китай и Россия.
 # Цель: найти смежную аудиторию инженеров и закупщиков, которые покупают компоненты БПЛА.
 
+# Контекстные entities: это anchors, они не создают топливные brand-seeds.
+@entity T-Motor
+@entity Hobbywing
+@entity CUAV
+@entity Holybro
+@entity Pixhawk
+@entity SIYI
+@entity Viewpro
+@entity Grepow
+@entity Tattu
+@entity DSpower
+@entity AGFRC
+@entity АЛМотор
+@entity АИСТ ГРУПП
+@entity ИнноДрайв
+@entity ХАРЗА
+@entity ГРИЗОН
+@entity СОЛОНГОЙ
+@entity РостовВинт
+@entity Роболёт
+@entity Аэросила
+@entity Завод Козицкого
+@entity МВМ Авиа
+
 # =========================================================
 # КИТАЙ — T-MOTOR
 # =========================================================

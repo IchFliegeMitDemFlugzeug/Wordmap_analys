@@ -37,6 +37,27 @@ test('negative vehicle tokens always override otherwise strong product signals',
   const unrelatedModel = classifyQuery('редукционный клапан топливный 4hk1 купить', { rootSeed: 'мягкий бак БПЛА' });
   assert.equal(unrelatedModel.recursiveEligible, false);
   assert.equal(unrelatedModel.deepEligible, false);
+  for (const query of ['топливный бак камаза', 'бак для УАЗа', 'топливный насос Toyota', 'бак Ford', 'топливный фильтр Hyundai']) {
+    const result = classifyQuery(query, fuelContext);
+    assert.equal(result.relevanceClass, 'noise', query);
+    assert.equal(result.recursiveEligible, false, query);
+    assert.equal(result.deepEligible, false, query);
+  }
+});
+
+test('generic product words do not create meaningful root overlap', () => {
+  for (const [rootSeed, query] of [['топливный фильтр БПЛА', 'фильтр для воды'], ['насос топливной системы БПЛА', 'насосы для воды'], ['мягкие топливные баки', 'баки пластиковые для воды']]) {
+    const result = classifyQuery(query, { rootSeed });
+    assert.notEqual(result.relevanceClass, 'adjacent', query);
+    assert.equal(result.recursiveEligible, false, query);
+    assert.equal(result.deepEligible, false, query);
+  }
+  for (const query of ['топливные фильтры БПЛА', 'насосы БПЛА']) {
+    const result = classifyQuery(query, { rootSeed: 'комплектующие БПЛА' });
+    assert.equal(result.relevanceClass, 'adjacent', query);
+    assert.equal(result.recursiveEligible, true, query);
+    assert.equal(result.deepEligible, true, query);
+  }
 });
 
 test('fuel/UAV engineering queries remain eligible', () => {

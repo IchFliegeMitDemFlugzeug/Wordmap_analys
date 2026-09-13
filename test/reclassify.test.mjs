@@ -5,8 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { ALGORITHM_VERSION } from '../src/config.mjs';
-import { addQuery, getMeta, openDatabase } from '../src/db.mjs';
+import { addQuery, getMeta, openDatabase, setMeta } from '../src/db.mjs';
 import { reclassifyRun } from '../src/reclassify-run.mjs';
+import { findResumableRun } from '../src/run-version.mjs';
 
 test('offline reclassification creates a consistent WAL-aware backup without API clients', async () => {
   const runDir = mkdtempSync(join(tmpdir(), 'wordmap-reclassify-'));
@@ -38,8 +39,29 @@ test('offline reclassification creates a consistent WAL-aware backup without API
   db = openDatabase(databaseFile);
   const after = Object.fromEntries(Object.keys(before).map((table) => [table, db.prepare(`SELECT COUNT(*) count FROM ${table}`).get().count]));
   assert.deepEqual(after, before);
-  assert.equal(getMeta(db, 'algorithm_version'), String(ALGORITHM_VERSION));
+  assert.equal(getMeta(db, 'algorithm_version'), undefined);
+  assert.equal(getMeta(db, 'reclassification_algorithm_version'), String(ALGORITHM_VERSION));
+  assert.equal(getMeta(db, 'resume_disabled'), '1');
   assert.deepEqual(db.prepare('SELECT relevance_class,recursive_eligible,deep_eligible,status FROM queries WHERE id=?').get(relevant.id), { relevance_class: 'adjacent', recursive_eligible: 1, deep_eligible: 1, status: 'stored' });
   assert.deepEqual(db.prepare('SELECT relevance_class,recursive_eligible,deep_eligible,status FROM queries WHERE id=?').get(noise.id), { relevance_class: 'noise', recursive_eligible: 0, deep_eligible: 0, status: 'stored' });
   db.close();
+});
+
+test('reclassified paused legacy run remains analysis-only and cannot resume', async () => {
+  const resultsRoot = mkdtempSync(join(tmpdir(), 'wordmap-analysis-only-'));
+  const runDir = join(resultsRoot, 'legacy-run');
+  mkdirSync(join(runDir, 'raw'), { recursive: true });
+  writeFileSync(join(runDir, 'input.txt'), 'топливный бак БПЛА\n');
+  const db = openDatabase(join(runDir, 'research.sqlite'));
+  setMeta(db, 'input_hash', 'legacy-hash');
+  setMeta(db, 'status', 'paused');
+  setMeta(db, 'algorithm_version', 3);
+  db.close();
+  await reclassifyRun(runDir);
+  const checked = openDatabase(join(runDir, 'research.sqlite'));
+  assert.equal(getMeta(checked, 'algorithm_version'), '3');
+  assert.equal(getMeta(checked, 'reclassification_algorithm_version'), String(ALGORITHM_VERSION));
+  assert.equal(getMeta(checked, 'resume_disabled'), '1');
+  checked.close();
+  assert.equal(findResumableRun(resultsRoot, 'legacy-hash'), undefined);
 });

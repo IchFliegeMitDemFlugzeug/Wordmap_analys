@@ -11,9 +11,9 @@ export function findResumableRun(root, inputHash, algorithmVersion = ALGORITHM_V
     if (!existsSync(file)) continue;
     const probe = new Database(file, { readonly: true });
     try {
-      const rows = probe.prepare("SELECT key,value FROM meta WHERE key IN ('input_hash','algorithm_version','status')").all();
+      const rows = probe.prepare("SELECT key,value FROM meta WHERE key IN ('input_hash','algorithm_version','status','resume_disabled')").all();
       const meta = Object.fromEntries(rows.map((row) => [row.key, row.value]));
-      if (meta.input_hash === inputHash && meta.algorithm_version === String(algorithmVersion) &&
+      if (meta.resume_disabled !== '1' && meta.input_hash === inputHash && meta.algorithm_version === String(algorithmVersion) &&
           (!meta.status || ['running', 'paused', 'incomplete'].includes(meta.status))) return path.join(root, name);
     } finally {
       probe.close();

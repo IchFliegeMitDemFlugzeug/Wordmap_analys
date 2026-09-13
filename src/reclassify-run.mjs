@@ -68,7 +68,8 @@ export async function reclassifyRun(runDirectory) {
         update.run(relevance.relevanceClass, JSON.stringify(relevance.reasons), recursiveEligible ? 1 : 0,
           deepEligible ? 1 : 0, expansionStatus, recursiveEligible ? null : 'relevance', query.id);
       }
-      setMeta(db, 'algorithm_version', ALGORITHM_VERSION);
+      setMeta(db, 'reclassification_algorithm_version', ALGORITHM_VERSION);
+      setMeta(db, 'resume_disabled', 1);
     })();
     generateReport(db, runDir);
     return { queries: queries.length, runDir, backupFile };
