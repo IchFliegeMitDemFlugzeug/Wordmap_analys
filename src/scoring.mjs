@@ -1,5 +1,5 @@
 // Semantic matching lives in this module so discovery never has to use unsafe substring checks.
-export const HIGH_DOMAIN = ['бпла', 'бла', 'бвс', 'бас', 'дрон', 'дроны', 'дронов', 'самолет', 'самолеты', 'вертолет', 'вертолеты', 'авиация', 'aircraft', 'uav', 'drone'];
+export const HIGH_DOMAIN = ['бпла', 'бла', 'бвс', 'бас', 'дрон', 'дроны', 'дрона', 'дрону', 'дронов', 'дронами', 'дронах', 'самолет', 'самолеты', 'самолета', 'самолетов', 'вертолет', 'вертолеты', 'вертолета', 'вертолетов', 'авиация', 'aircraft', 'uav', 'drone', 'drones'];
 export const PRODUCT = ['бак', 'бака', 'баки', 'баков', 'штуцер', 'фитинг', 'фильтр', 'клапан', 'трубка', 'шланг', 'датчик', 'насос', 'fuel', 'tank', 'tanks', 'bladder', 'fitting', 'clunk', 'valve', 'vent', 'hose', 'tubing', 'pump'];
 export const COMMERCIAL = ['купить', 'цена', 'заказать', 'заказ', 'изготовление', 'производитель', 'производство', 'поставщик', 'продажа'];
 export const NEGATIVE = ['ваз', 'ваза', 'лада', 'лады', 'камаз', 'камаза', 'камазы', 'камазов', 'газель', 'газели', 'уаз', 'уаза', 'трактор', 'трактора', 'тракторы', 'тракторов', 'мотоблок', 'мотоблока', 'мотоблоки', 'мотоблоков', 'бензопила', 'бензопилы', 'триммер', 'триммера', 'триммеры', 'триммеров', 'мотоцикл', 'мотоцикла', 'мотоциклы', 'мотоциклов'];
@@ -100,9 +100,10 @@ export function classifyQuery(query, context = {}) {
   const signal = semanticSignals(query, context);
   const score = scoreQuery(query, context);
   const reasons = [];
+  const strongFuelTankContext = signal.domain || signal.entity || signal.modelContext || signal.rootOverlap.length > 0;
   let relevanceClass = 'noise';
   if (signal.hardNoise || signal.negative) reasons.push(signal.hardNoise ? 'hard-noise intent or market' : 'negative market token');
-  else if ((signal.fuel && signal.tank && !signal.accessory) || (signal.tank && signal.domain && !signal.accessory)) {
+  else if ((signal.fuel && signal.tank && strongFuelTankContext && !signal.accessory) || (signal.tank && signal.domain && !signal.accessory)) {
     relevanceClass = 'core';
     reasons.push('fuel-tank product combination');
   } else if (signal.entity && (signal.technical || signal.model)) {

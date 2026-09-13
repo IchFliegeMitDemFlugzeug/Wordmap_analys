@@ -19,6 +19,12 @@ test('semantic drift is noise or non-recursive', () => {
     assert.equal(result.recursiveEligible, false, query);
     assert.equal(result.deepEligible, false, query);
   }
+  for (const query of ['топливный бак лодки', 'топливный бак генератора', 'топливный бак экскаватора']) {
+    const result = classifyQuery(query, { rootSeed: 'комплектующие БПЛА' });
+    assert.notEqual(result.relevanceClass, 'core', query);
+    assert.equal(result.recursiveEligible, false, query);
+    assert.equal(result.deepEligible, false, query);
+  }
   for (const query of ['топливный насос вебасто', 'топливный фильтр toyota']) assert.equal(classifyQuery(query, fuelContext).recursiveEligible, false);
   for (const query of ['авиационное топливо', 'топливный фильтр', 'горловина топливного бака']) {
     const result = classifyQuery(query, fuelContext);
@@ -63,6 +69,12 @@ test('generic product words do not create meaningful root overlap', () => {
 test('fuel/UAV engineering queries remain eligible', () => {
   for (const query of ['мягкий топливный бак', 'авиационный мягкий топливный бак', 'топливный бак БПЛА', 'UAV fuel tank', 'мягкие топливные баки для БПЛА', 'UAV fuel tanks', 'топливные баки для дронов']) {
     assert.equal(classifyQuery(query, fuelContext).relevanceClass, 'core', query);
+  }
+  for (const query of ['фильтр для дрона', 'насос самолета БПЛА', 'fuel filter drones']) {
+    const result = classifyQuery(query, { rootSeed: 'комплектующие БПЛА' });
+    assert.equal(result.relevanceClass, 'adjacent', query);
+    assert.equal(result.recursiveEligible, true, query);
+    assert.equal(result.deepEligible, true, query);
   }
   for (const query of ['топливный фильтр БПЛА', 'насос топливной системы БПЛА']) {
     const result = classifyQuery(query, fuelContext);
