@@ -70,9 +70,15 @@ function semanticSignals(query, context = {}) {
   const rootEntities = entityMatches(root, entities);
   const domain = matcher.hasAnyToken(HIGH_DOMAIN) || matcher.hasAllowedPrefix(SAFE_PREFIXES.domain);
   const fuel = matcher.hasToken('fuel') || matcher.hasAllowedPrefix(SAFE_PREFIXES.fuel);
-  const tank = matcher.hasAnyToken(['бак', 'бака', 'баки', 'баков', 'tank', 'tanks', 'bladder']);
-  const flexible = matcher.hasAnyToken(['flexible', 'bladder']) || matcher.hasAllowedPrefix(FLEXIBLE_PREFIXES);
-  const targetFuelTank = flexible && (tank || fuel);
+  const tankNoun = matcher.hasAnyToken([
+    'бак', 'бака', 'баку', 'баке', 'баком',
+    'баки', 'баков', 'бакам', 'баками', 'баках',
+    'tank', 'tanks',
+  ]);
+  const bladder = matcher.hasToken('bladder');
+  const tank = tankNoun || bladder;
+  const flexible = matcher.hasToken('flexible') || bladder || matcher.hasAllowedPrefix(FLEXIBLE_PREFIXES);
+  const targetFuelTank = (flexible && tankNoun) || (bladder && (fuel || tankNoun));
   const accessory = matcher.hasAnyToken([...COMPONENT_FORMS, 'горловина', 'fitting', 'filter', 'pump', 'hose', 'tubing']) || matcher.hasAllowedPrefix(SAFE_PREFIXES.product);
   const product = accessory || matcher.hasAnyToken(PRODUCT) || matcher.hasAllowedPrefix(SAFE_PREFIXES.product) || fuel;
   const technical = matcher.tokens.some((token) => TECHNICAL.has(token)) || product;
@@ -89,9 +95,20 @@ function semanticSignals(query, context = {}) {
   const entity = matchedEntities.length > 0;
   const rootDomain = root.hasAnyToken(HIGH_DOMAIN) || root.hasAllowedPrefix(SAFE_PREFIXES.domain);
   const rootFuel = root.hasToken('fuel') || root.hasAllowedPrefix(SAFE_PREFIXES.fuel);
-  const rootTank = root.hasAnyToken(['бак', 'бака', 'баки', 'баков', 'tank', 'tanks', 'bladder']);
-  const rootFlexible = root.hasAnyToken(['flexible', 'bladder']) || root.hasAllowedPrefix(FLEXIBLE_PREFIXES);
-  const rootIsTrusted = rootDomain || rootEntities.length > 0 || (rootFlexible && (rootTank || rootFuel));
+  const rootTankNoun = root.hasAnyToken([
+    'бак', 'бака', 'баку', 'баке', 'баком',
+    'баки', 'баков', 'бакам', 'баками', 'баках',
+    'tank', 'tanks',
+  ]);
+  const rootBladder = root.hasToken('bladder');
+  const rootFlexible = root.hasToken('flexible') || rootBladder || root.hasAllowedPrefix(FLEXIBLE_PREFIXES);
+  const rootTargetFuelTank =
+    (rootFlexible && rootTankNoun) ||
+    (rootBladder && (rootFuel || rootTankNoun));
+  const rootIsTrusted =
+    rootDomain ||
+    rootEntities.length > 0 ||
+    rootTargetFuelTank;
   const trustedRootOverlap = rootIsTrusted && rootOverlap.length > 0;
   const modelContext = entity || domain || trustedRootOverlap;
   const strongContext = domain || entity || targetFuelTank || trustedRootOverlap;

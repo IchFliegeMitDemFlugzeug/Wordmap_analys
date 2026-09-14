@@ -17,13 +17,19 @@ test('an untrusted root overlap cannot promote semantic drift', () => {
 });
 
 test('flexible fuel tanks are the target product without a UAV word', () => {
-  for (const query of ['мягкий топливный бак', 'гибкий топливный бак', 'эластичный топливный бак', 'резиновый топливный бак', 'авиационный мягкий топливный бак', 'flexible fuel tank', 'fuel bladder', 'bladder tank']) {
+  for (const query of ['мягкий топливный бак', 'мягкий бак', 'гибкий топливный бак', 'эластичный топливный бак', 'резиновый топливный бак', 'авиационный мягкий топливный бак', 'flexible fuel tank', 'fuel bladder', 'bladder tank']) {
     const result = classifyQuery(query, { rootSeed: 'мягкий топливный бак' });
     assert.equal(result.relevanceClass, 'core', query);
     assert.equal(result.recursiveEligible, true, query);
     assert.equal(result.deepEligible, true, query);
   }
   assert.equal(classifyQuery('топливный бак').relevanceClass, 'broad');
+  for (const query of ['гибкий топливный насос', 'резиновый топливный шланг', 'flexible fuel filter']) {
+    assert.notEqual(classifyQuery(query).relevanceClass, 'core', query);
+  }
+  assert.notEqual(classifyQuery('bladder').relevanceClass, 'core');
+  const adjacentPump = classifyQuery('гибкий топливный насос БПЛА', { rootSeed: 'топливная система БПЛА' });
+  assert.equal(adjacentPump.relevanceClass, 'adjacent');
 });
 
 test('components require a trusted domain/entity context', () => {

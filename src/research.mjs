@@ -162,7 +162,8 @@ export async function runResearch({ db, client, runDir, brands = [], entities = 
   const insertDeep = db.prepare('INSERT OR IGNORE INTO analysis_status(query_id,updated_at) VALUES(?,?)');
   for (const item of autoDeep) insertDeep.run(item.id, timestamp);
   const frequency = typeof client.measureFrequencies !== 'function' ? [] : db.prepare(`SELECT q.id FROM queries q LEFT JOIN wordstat_top w ON w.query_id=q.id
-    WHERE q.relevance_class IN ('core','adjacent') AND EXISTS (SELECT 1 FROM analysis_status a WHERE a.query_id=q.id)
+    WHERE (q.manual_seed=1 OR q.relevance_class IN ('core','adjacent'))
+      AND EXISTS (SELECT 1 FROM analysis_status a WHERE a.query_id=q.id)
     ORDER BY CASE WHEN q.manual_seed=1 AND q.relevance_class='core' THEN 0
       WHEN q.relevance_class='core' THEN 1 WHEN q.manual_seed=1 THEN 2 ELSE 3 END,
       q.score DESC,COALESCE(w.total_count,(SELECT MAX(r.count) FROM relations r WHERE r.child_query_id=q.id),0) DESC,q.id

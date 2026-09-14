@@ -38,6 +38,50 @@ test('frequency stage persists quoted data and a done stage is resumable without
   db.close();
 });
 
+test('manual broad seed receives frequency validation', async () => {
+  const db = openDatabase(':memory:');
+  const query = 'топливный бак';
+  const relevance = classifyQuery(query, { rootSeed: query });
+
+  assert.equal(relevance.relevanceClass, 'broad');
+
+  addQuery(db, query, {
+    manualSeed: true,
+    ...relevance,
+    status: 'done',
+  });
+
+  const counter = { calls: 0 };
+  const mock = client(counter);
+
+  await runResearch({
+    db,
+    client: mock,
+    runDir: directory(),
+  });
+
+  assert.equal(counter.calls, 1);
+
+  const row = db.prepare(`
+    SELECT a.frequency_status,
+           f.broad_count,
+           f.quoted_count,
+           f.exact_count
+    FROM analysis_status a
+    LEFT JOIN wordstat_frequency_validation f
+      ON f.query_id=a.query_id
+  `).get();
+
+  assert.deepEqual(row, {
+    frequency_status: 'done',
+    broad_count: 1000,
+    quoted_count: 30,
+    exact_count: 10,
+  });
+
+  db.close();
+});
+
 test('partial SERP clustering can run during graceful shutdown and isolates errors', () => {
   const db = openDatabase(':memory:');
   const ids = ['one', 'two'].map((query) => addQuery(db, query, { status: 'done' }).id);
