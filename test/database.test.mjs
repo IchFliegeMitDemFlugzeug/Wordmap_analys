@@ -4,19 +4,30 @@ import Database from 'better-sqlite3';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { addQuery, openDatabase, quotaState, recoverProcessing } from '../src/db.mjs';
+import { addQuery, calculateRunStatus, openDatabase, quotaState, recoverProcessing } from '../src/db.mjs';
 
 test('schema, dedup and recovery', () => {
   const db = openDatabase(':memory:');
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name='analysis_status'").get());
+  assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name='wordstat_frequency_validation'").get());
   const query = addQuery(db, 'Ёж', { score: 1 });
   addQuery(db, ' еж ', { score: 2 });
   assert.equal(db.prepare('SELECT count(*) n FROM queries').get().n, 1);
   db.prepare("UPDATE queries SET status='processing'").run();
-  db.prepare("INSERT INTO analysis_status(query_id,dynamics_status,regions_status,serp_status,updated_at) VALUES(?,?,?,?,?)").run(query.id, 'processing', 'processing', 'processing', new Date().toISOString());
+  db.prepare("INSERT INTO analysis_status(query_id,dynamics_status,regions_status,serp_status,frequency_status,updated_at) VALUES(?,?,?,?,?,?)").run(query.id, 'processing', 'processing', 'processing', 'processing', new Date().toISOString());
   assert.equal(recoverProcessing(db), 1);
   assert.equal(db.prepare('SELECT status FROM queries').get().status, 'queued');
   assert.deepEqual(db.prepare('SELECT dynamics_status,regions_status,serp_status FROM analysis_status').get(), { dynamics_status: 'pending', regions_status: 'pending', serp_status: 'pending' });
+  assert.equal(db.prepare('SELECT frequency_status FROM analysis_status').get().frequency_status, 'pending');
+  db.close();
+});
+
+test('unplanned frequency validation does not keep a completed run incomplete', () => {
+  const db = openDatabase(':memory:');
+  const query = addQuery(db, 'stored broad query', { status: 'stored' });
+  db.prepare("INSERT INTO analysis_status(query_id,dynamics_status,regions_status,serp_status,frequency_status,updated_at) VALUES(?,?,?,?,?,?)")
+    .run(query.id, 'done', 'done', 'done', null, new Date().toISOString());
+  assert.equal(calculateRunStatus(db), 'completed');
   db.close();
 });
 
@@ -40,6 +51,8 @@ test('opening a legacy database adds relevance columns idempotently', () => {
     const db = openDatabase(filename);
     const columns = new Set(db.prepare('PRAGMA table_info(queries)').all().map((column) => column.name));
     for (const name of ['relevance_class', 'relevance_reason', 'recursive_eligible', 'deep_eligible', 'expansion_status', 'skip_reason']) assert.ok(columns.has(name));
+    assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name='wordstat_frequency_validation'").get());
+    assert.ok(new Set(db.prepare('PRAGMA table_info(analysis_status)').all().map((column) => column.name)).has('frequency_status'));
     db.close();
   }
 });

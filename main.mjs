@@ -3,10 +3,10 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { addQuery, calculateRunStatus, getMeta, openDatabase, recoverProcessing, setMeta } from './src/db.mjs';
-import { ALGORITHM_VERSION } from './src/config.mjs';
+import { ALGORITHM_VERSION, CONFIG_FINGERPRINT, RESEARCH_PROFILE } from './src/config.mjs';
 import { configureLogger, log } from './src/logger.mjs';
 import { generateReport } from './src/report.mjs';
-import { clusterSerp, expandBrands, parseInput, runResearch } from './src/research.mjs';
+import { clusterPartialSerp, clusterSerp, expandBrands, parseInput, runResearch } from './src/research.mjs';
 import { findResumableRun } from './src/run-version.mjs';
 import { classifyQuery } from './src/scoring.mjs';
 import { createSearchClient } from './src/yandex-search.mjs';
@@ -39,6 +39,8 @@ async function main() {
   const db = openDatabase(path.join(runDir, 'research.sqlite'));
   setMeta(db, 'input_hash', hash);
   setMeta(db, 'algorithm_version', ALGORITHM_VERSION);
+  setMeta(db, 'config_fingerprint', CONFIG_FINGERPRINT);
+  setMeta(db, 'research_profile', RESEARCH_PROFILE);
   setMeta(db, 'status', 'running');
   recoverProcessing(db);
   log('info', `Run ${resumed ? 'resume' : 'start'}: ${path.basename(runDir)}`);
@@ -49,6 +51,7 @@ async function main() {
     log('info', 'Ctrl+C');
     setMeta(db, 'status', 'paused');
     recoverProcessing(db);
+    clusterPartialSerp(db, (error) => log('error', `Не удалось кластеризовать частичный SERP: ${error.message}`));
     try { generateReport(db, runDir); } catch (error) { log('error', `Не удалось обновить отчёт при остановке: ${error.message}`); }
     db.close();
     console.log('Исследование приостановлено. Следующий запуск продолжит его.');

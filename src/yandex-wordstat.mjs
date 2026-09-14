@@ -1,5 +1,7 @@
 import { quotaState } from './db.mjs';
 import { log } from './logger.mjs';
+import { PHANTOM_RATIO_THRESHOLD } from './config.mjs';
+import { toExactForm, toQuotedForm } from './wordstat-operators.mjs';
 
 const BASE_URL = 'https://searchapi.api.cloud.yandex.net/v2/wordstat';
 const TRANSIENT_STATUSES = new Set([500, 502, 503, 504]);
@@ -135,6 +137,20 @@ export function createWordstatClient({ apiKey, folderId, db, fetchImpl = globalT
     return { totalCount: Number(data.totalCount ?? 0), results: (data.results ?? []).map(normalize), associations: (data.associations ?? []).map(normalize), raw: data };
   }
 
+  async function getTotalCount(phrase, queryId) {
+    const data = await request('/topRequests', { phrase, numPhrases: '1', regions: ['225'], devices: ['DEVICE_ALL'] }, queryId);
+    return Number(data.totalCount ?? 0);
+  }
+
+  async function measureFrequencies(phrase, queryId, knownBroad = null) {
+    const broadCount = knownBroad == null ? await getTotalCount(phrase, queryId) : Number(knownBroad);
+    const quotedCount = await getTotalCount(toQuotedForm(phrase), queryId);
+    const exactCount = await getTotalCount(toExactForm(phrase), queryId);
+    const broadExactRatio = exactCount > 0 ? broadCount / exactCount : null;
+    const isPhantom = (broadCount > 0 && exactCount === 0) || (exactCount > 0 && broadExactRatio >= PHANTOM_RATIO_THRESHOLD);
+    return { broadCount, quotedCount, exactCount, broadExactRatio, isPhantom, threshold: PHANTOM_RATIO_THRESHOLD };
+  }
+
   async function getDynamics(phrase, dates, queryId) {
     const data = await request('/dynamics', {
       phrase, period: 'PERIOD_MONTHLY', fromDate: `${dates.fromDate}T00:00:00Z`, toDate: `${dates.toDate}T00:00:00Z`,
@@ -162,5 +178,5 @@ export function createWordstatClient({ apiKey, folderId, db, fetchImpl = globalT
     return { results, raw: data };
   }
 
-  return { getTopRequests, getDynamics, getRegionsDistribution, getRegionsTree };
+  return { getTopRequests, getTotalCount, measureFrequencies, getDynamics, getRegionsDistribution, getRegionsTree };
 }

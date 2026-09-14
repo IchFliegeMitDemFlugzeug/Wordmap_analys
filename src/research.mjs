@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { addQuery, setMeta } from './db.mjs';
-import { MAX_AUTO_DEEP_QUERIES, MAX_AUTO_EXPANSIONS_PER_ROOT, MAX_AUTO_EXPANSIONS_PER_RUN, MAX_DEPTH } from './config.mjs';
+import { MAX_AUTO_DEEP_QUERIES, MAX_AUTO_EXPANSIONS_PER_ROOT, MAX_AUTO_EXPANSIONS_PER_RUN, MAX_DEPTH, MAX_FREQUENCY_VALIDATIONS } from './config.mjs';
 import { log } from './logger.mjs';
 import { classifyQuery, normalizeUrl } from './scoring.mjs';
 import { alignDates, formatDate } from './vendor/yandex/wordstat-dates.mjs';
@@ -161,9 +161,26 @@ export async function runResearch({ db, client, runDir, brands = [], entities = 
       COALESCE(w.total_count,(SELECT MAX(r.count) FROM relations r WHERE r.child_query_id=q.id),0) DESC,q.id LIMIT ?`).all(MAX_AUTO_DEEP_QUERIES);
   const insertDeep = db.prepare('INSERT OR IGNORE INTO analysis_status(query_id,updated_at) VALUES(?,?)');
   for (const item of autoDeep) insertDeep.run(item.id, timestamp);
+  const frequency = typeof client.measureFrequencies !== 'function' ? [] : db.prepare(`SELECT q.id FROM queries q LEFT JOIN wordstat_top w ON w.query_id=q.id
+    WHERE (q.manual_seed=1 OR q.relevance_class IN ('core','adjacent'))
+      AND EXISTS (SELECT 1 FROM analysis_status a WHERE a.query_id=q.id)
+    ORDER BY CASE WHEN q.manual_seed=1 AND q.relevance_class='core' THEN 0
+      WHEN q.relevance_class='core' THEN 1 WHEN q.manual_seed=1 THEN 2 ELSE 3 END,
+      q.score DESC,COALESCE(w.total_count,(SELECT MAX(r.count) FROM relations r WHERE r.child_query_id=q.id),0) DESC,q.id
+    LIMIT ?`).all(MAX_FREQUENCY_VALIDATIONS);
+  const planFrequency = db.prepare(`INSERT INTO analysis_status(query_id,frequency_status,updated_at) VALUES(?,'pending',?)
+    ON CONFLICT(query_id) DO UPDATE SET frequency_status=CASE
+      WHEN analysis_status.frequency_status IN ('done','failed') THEN analysis_status.frequency_status ELSE 'pending' END,updated_at=excluded.updated_at`);
+  for (const item of frequency) planFrequency.run(item.id, timestamp);
   const dates = getLast24CompletedMonths();
-  const deep = db.prepare(`SELECT q.*,a.dynamics_status,a.regions_status,a.serp_status FROM queries q
-    JOIN analysis_status a ON a.query_id=q.id ORDER BY q.id`).all();
+  const deep = db.prepare(`SELECT q.*,w.total_count known_broad,a.frequency_status,a.dynamics_status,a.regions_status,a.serp_status FROM queries q
+    JOIN analysis_status a ON a.query_id=q.id LEFT JOIN wordstat_top w ON w.query_id=q.id ORDER BY q.id`).all();
+  for (const q of deep) {
+    await runStage({ db, q, stage: 'frequency', execute: () => client.measureFrequencies(q.query, q.id, q.known_broad), generateReport,
+      save: (data) => db.prepare(`INSERT OR REPLACE INTO wordstat_frequency_validation
+        (query_id,broad_count,quoted_count,exact_count,broad_exact_ratio,is_phantom,threshold,retrieved_at) VALUES(?,?,?,?,?,?,?,?)`)
+        .run(q.id, data.broadCount, data.quotedCount, data.exactCount, data.broadExactRatio, data.isPhantom ? 1 : 0, data.threshold, new Date().toISOString()) });
+  }
   for (const q of deep) {
     await runStage({ db, q, stage: 'dynamics', execute: () => client.getDynamics(q.query, dates, q.id), generateReport,
       save: (data) => { db.prepare('DELETE FROM dynamics WHERE query_id=?').run(q.id); for (const item of data.results) db.prepare('INSERT INTO dynamics VALUES(?,?,?,?)').run(q.id, item.date, item.count, item.share); } });
@@ -190,4 +207,13 @@ export function clusterSerp(db) {
     for (const id of part) db.prepare('INSERT INTO cluster_queries VALUES(?,?)').run(info.lastInsertRowid, id);
   }
   return components;
+}
+
+export function clusterPartialSerp(db, onError = () => {}) {
+  try {
+    return clusterSerp(db);
+  } catch (error) {
+    onError(error);
+    return [];
+  }
 }

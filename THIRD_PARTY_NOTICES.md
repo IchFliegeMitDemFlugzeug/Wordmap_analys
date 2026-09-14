@@ -2,6 +2,10 @@
 
 Части XML-парсера и логики дат произведены от **stufently/yandex-mcp**: https://github.com/stufently/yandex-mcp — **MIT License**.
 
+Архитектурные идеи broad/quoted/exact, эвристики phantom и подхода SEED → VALIDATE изучены по
+**malovnik/wordstat-toolkit**: https://github.com/malovnik/wordstat-toolkit — **MIT License**.
+Код проекта не копируется и не подключается как зависимость; реализация выполнена нативно на JavaScript.
+
 ## MIT License
 
 Copyright (c) stufently/yandex-mcp contributors
