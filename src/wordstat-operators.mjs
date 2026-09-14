@@ -1,7 +1,5 @@
 function naturalPhrase(phrase) {
-  let value = String(phrase ?? '').trim().replace(/\s+/gu, ' ');
-  if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1).trim();
-  value = value.replace(/(^|\s)!+(?=[\p{L}\p{N}])/gu, '$1');
+  const value = String(phrase ?? '').replace(/[!"\[\]()|+]/gu, ' ').trim().replace(/\s+/gu, ' ');
   if (!value) throw new TypeError('Wordstat phrase must not be empty');
   return value;
 }

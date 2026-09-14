@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { addQuery, calculateRunStatus, getMeta, openDatabase, recoverProcessing, setMeta } from './src/db.mjs';
-import { ALGORITHM_VERSION, RESEARCH_PROFILE } from './src/config.mjs';
+import { ALGORITHM_VERSION, CONFIG_FINGERPRINT, RESEARCH_PROFILE } from './src/config.mjs';
 import { configureLogger, log } from './src/logger.mjs';
 import { generateReport } from './src/report.mjs';
 import { clusterPartialSerp, clusterSerp, expandBrands, parseInput, runResearch } from './src/research.mjs';
@@ -39,6 +39,7 @@ async function main() {
   const db = openDatabase(path.join(runDir, 'research.sqlite'));
   setMeta(db, 'input_hash', hash);
   setMeta(db, 'algorithm_version', ALGORITHM_VERSION);
+  setMeta(db, 'config_fingerprint', CONFIG_FINGERPRINT);
   setMeta(db, 'research_profile', RESEARCH_PROFILE);
   setMeta(db, 'status', 'running');
   recoverProcessing(db);

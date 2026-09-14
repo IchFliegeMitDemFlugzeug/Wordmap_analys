@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 // Persisted semantic and eligibility decisions changed in v5.
 export const ALGORITHM_VERSION = 5;
 
@@ -27,3 +29,26 @@ export const MAX_AUTO_DEEP_QUERIES = positiveNumber('MAX_AUTO_DEEP_QUERIES', pro
 export const MAX_FREQUENCY_VALIDATIONS = positiveNumber('MAX_FREQUENCY_VALIDATIONS', profile.maxFrequency);
 export const PHANTOM_RATIO_THRESHOLD = positiveNumber('PHANTOM_RATIO_THRESHOLD', 10, false);
 export const RESEARCH_PROFILES = PROFILES;
+
+export function createConfigFingerprint(config) {
+  const effectiveConfig = {
+    RESEARCH_PROFILE: config.RESEARCH_PROFILE,
+    MAX_DEPTH: config.MAX_DEPTH,
+    MAX_AUTO_EXPANSIONS_PER_ROOT: config.MAX_AUTO_EXPANSIONS_PER_ROOT,
+    MAX_AUTO_EXPANSIONS_PER_RUN: config.MAX_AUTO_EXPANSIONS_PER_RUN,
+    MAX_AUTO_DEEP_QUERIES: config.MAX_AUTO_DEEP_QUERIES,
+    MAX_FREQUENCY_VALIDATIONS: config.MAX_FREQUENCY_VALIDATIONS,
+    PHANTOM_RATIO_THRESHOLD: config.PHANTOM_RATIO_THRESHOLD,
+  };
+  return createHash('sha256').update(JSON.stringify(effectiveConfig)).digest('hex');
+}
+
+export const CONFIG_FINGERPRINT = createConfigFingerprint({
+  RESEARCH_PROFILE,
+  MAX_DEPTH,
+  MAX_AUTO_EXPANSIONS_PER_ROOT,
+  MAX_AUTO_EXPANSIONS_PER_RUN,
+  MAX_AUTO_DEEP_QUERIES,
+  MAX_FREQUENCY_VALIDATIONS,
+  PHANTOM_RATIO_THRESHOLD,
+});
