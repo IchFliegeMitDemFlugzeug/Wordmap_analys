@@ -21,6 +21,7 @@ const COMPONENT_FORMS = Object.freeze(Object.values(COMPONENT_FAMILIES).flat());
 const GENERIC_ANCHORS = new Set([...PRODUCT, ...COMPONENT_FORMS, ...COMMERCIAL, 'filter', 'system', 'systems', 'система', 'системы', 'компонент', 'компоненты', 'для']);
 const HARD_NEGATIVE = Object.freeze(['toyota', 'тойота', 'hyundai', 'хендай', 'kia', 'киа', 'renault', 'рено', 'nissan', 'ниссан', 'volkswagen', 'фольксваген', 'bmw', 'mercedes', 'мерседес', 'ford', 'форд', 'chevrolet', 'шевроле', 'skoda', 'шкода', 'audi', 'ауди', 'webasto', 'вебасто']);
 const TECHNICAL = new Set([...PRODUCT, 'autopilot', 'автопилот', 'motor', 'engine', 'двигатель', 'двигателя', 'компонент', 'система', 'системы']);
+const FLEXIBLE_PREFIXES = Object.freeze(['мягк', 'гибк', 'эластичн', 'резинов']);
 
 export function normalizeQuery(value) {
   return String(value).trim().toLowerCase().replaceAll('ё', 'е').replace(/\s+/gu, ' ');
@@ -66,9 +67,12 @@ function semanticSignals(query, context = {}) {
   const parent = createMatcher(context.parentQuery ?? '');
   const entities = [...new Set([...(context.brands ?? []), ...(context.entities ?? [])])];
   const matchedEntities = entityMatches(matcher, entities);
+  const rootEntities = entityMatches(root, entities);
   const domain = matcher.hasAnyToken(HIGH_DOMAIN) || matcher.hasAllowedPrefix(SAFE_PREFIXES.domain);
   const fuel = matcher.hasToken('fuel') || matcher.hasAllowedPrefix(SAFE_PREFIXES.fuel);
   const tank = matcher.hasAnyToken(['бак', 'бака', 'баки', 'баков', 'tank', 'tanks', 'bladder']);
+  const flexible = matcher.hasAnyToken(['flexible', 'bladder']) || matcher.hasAllowedPrefix(FLEXIBLE_PREFIXES);
+  const targetFuelTank = flexible && (tank || fuel);
   const accessory = matcher.hasAnyToken([...COMPONENT_FORMS, 'горловина', 'fitting', 'filter', 'pump', 'hose', 'tubing']) || matcher.hasAllowedPrefix(SAFE_PREFIXES.product);
   const product = accessory || matcher.hasAnyToken(PRODUCT) || matcher.hasAllowedPrefix(SAFE_PREFIXES.product) || fuel;
   const technical = matcher.tokens.some((token) => TECHNICAL.has(token)) || product;
@@ -83,9 +87,15 @@ function semanticSignals(query, context = {}) {
   const hardNoise = matcher.hasAnyToken(['авиабилет', 'авиабилеты', 'билет', 'билеты', 'автобус', 'рейс', 'bestway', 'intex', ...HARD_NEGATIVE]) ||
     matcher.hasAllowedPrefix(['бассейн', 'автомобил', 'антидрон']);
   const entity = matchedEntities.length > 0;
-  const modelContext = entity || domain || rootOverlap.length > 0;
-  const strongContext = domain || entity || rootOverlap.length > 0;
-  return { matcher, domain, fuel, tank, accessory, product, technical, entity, model, modelContext, strongContext, negative, hardNoise, matchedEntities, rootOverlap, parentOverlap };
+  const rootDomain = root.hasAnyToken(HIGH_DOMAIN) || root.hasAllowedPrefix(SAFE_PREFIXES.domain);
+  const rootFuel = root.hasToken('fuel') || root.hasAllowedPrefix(SAFE_PREFIXES.fuel);
+  const rootTank = root.hasAnyToken(['бак', 'бака', 'баки', 'баков', 'tank', 'tanks', 'bladder']);
+  const rootFlexible = root.hasAnyToken(['flexible', 'bladder']) || root.hasAllowedPrefix(FLEXIBLE_PREFIXES);
+  const rootIsTrusted = rootDomain || rootEntities.length > 0 || (rootFlexible && (rootTank || rootFuel));
+  const trustedRootOverlap = rootIsTrusted && rootOverlap.length > 0;
+  const modelContext = entity || domain || trustedRootOverlap;
+  const strongContext = domain || entity || targetFuelTank || trustedRootOverlap;
+  return { matcher, domain, fuel, tank, flexible, targetFuelTank, accessory, product, technical, entity, model, modelContext, strongContext, negative, hardNoise, matchedEntities, rootOverlap, parentOverlap, rootIsTrusted, trustedRootOverlap };
 }
 
 export function scoreQuery(query, { brands = [], entities = [], manualSeed = false } = {}) {
@@ -100,10 +110,10 @@ export function classifyQuery(query, context = {}) {
   const signal = semanticSignals(query, context);
   const score = scoreQuery(query, context);
   const reasons = [];
-  const strongFuelTankContext = signal.domain || signal.entity || signal.modelContext || signal.rootOverlap.length > 0;
+  const strongFuelTankContext = signal.domain || signal.entity || signal.targetFuelTank || signal.trustedRootOverlap;
   let relevanceClass = 'noise';
   if (signal.hardNoise || signal.negative) reasons.push(signal.hardNoise ? 'hard-noise intent or market' : 'negative market token');
-  else if ((signal.fuel && signal.tank && strongFuelTankContext && !signal.accessory) || (signal.tank && signal.domain && !signal.accessory)) {
+  else if (signal.targetFuelTank || ((signal.fuel && signal.tank && strongFuelTankContext && !signal.accessory) || (signal.tank && signal.domain && !signal.accessory))) {
     relevanceClass = 'core';
     reasons.push('fuel-tank product combination');
   } else if (signal.entity && (signal.technical || signal.model)) {
@@ -115,14 +125,14 @@ export function classifyQuery(query, context = {}) {
   } else if (signal.domain && signal.accessory) {
     relevanceClass = 'adjacent';
     reasons.push('engineering domain and technical product');
-  } else if (signal.strongContext && signal.technical && (signal.parentOverlap.length || signal.rootOverlap.length)) {
+  } else if (signal.strongContext && signal.technical && (signal.parentOverlap.length || signal.trustedRootOverlap)) {
     relevanceClass = 'adjacent';
     reasons.push('meaningful parent/root context overlap');
   } else if (signal.product || signal.domain || signal.entity) {
     relevanceClass = 'broad';
     reasons.push('related but lacks a strong contextual combination');
   } else reasons.push('no engineering-domain or contextual signal');
-  const associationHasStrongAnchor = signal.domain || signal.entity || (signal.model && signal.modelContext) || signal.rootOverlap.length > 0;
+  const associationHasStrongAnchor = signal.domain || signal.entity || (signal.model && signal.modelContext) || signal.trustedRootOverlap;
   const eligibleClass = relevanceClass === 'core' || relevanceClass === 'adjacent';
   const recursiveEligible = eligibleClass && (context.relationType !== 'ASSOCIATION' || associationHasStrongAnchor);
   const deepEligible = eligibleClass;

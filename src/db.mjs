@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS queries (id INTEGER PRIMARY KEY, query TEXT NOT NULL, normalized TEXT NOT NULL UNIQUE, depth INTEGER NOT NULL, score INTEGER NOT NULL, manual_seed INTEGER NOT NULL DEFAULT 0, brand_seed INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'queued', root_seed TEXT, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, relevance_class TEXT NOT NULL DEFAULT 'broad', relevance_reason TEXT NOT NULL DEFAULT '', recursive_eligible INTEGER NOT NULL DEFAULT 0, deep_eligible INTEGER NOT NULL DEFAULT 0, expansion_status TEXT NOT NULL DEFAULT 'not_considered', skip_reason TEXT);
 CREATE TABLE IF NOT EXISTS relations (parent_query_id INTEGER REFERENCES queries(id), child_query_id INTEGER REFERENCES queries(id), relation_type TEXT, count INTEGER, created_at TEXT, UNIQUE(parent_query_id, child_query_id, relation_type));
 CREATE TABLE IF NOT EXISTS wordstat_top (query_id INTEGER PRIMARY KEY REFERENCES queries(id), total_count INTEGER, response_json TEXT, retrieved_at TEXT);
+CREATE TABLE IF NOT EXISTS wordstat_frequency_validation (query_id INTEGER PRIMARY KEY REFERENCES queries(id), broad_count INTEGER, quoted_count INTEGER, exact_count INTEGER, broad_exact_ratio REAL, is_phantom INTEGER NOT NULL DEFAULT 0, threshold REAL, retrieved_at TEXT);
 CREATE TABLE IF NOT EXISTS dynamics (query_id INTEGER REFERENCES queries(id), date TEXT, count INTEGER, share REAL, UNIQUE(query_id,date));
 CREATE TABLE IF NOT EXISTS regions (query_id INTEGER REFERENCES queries(id), region_id TEXT, region_name TEXT, count INTEGER, share REAL, affinity_index REAL, UNIQUE(query_id,region_id));
 CREATE TABLE IF NOT EXISTS serp (query_id INTEGER REFERENCES queries(id), position INTEGER, url TEXT, normalized_url TEXT, domain TEXT, title TEXT, snippet TEXT, retrieved_at TEXT, UNIQUE(query_id,position));
@@ -22,6 +23,7 @@ CREATE TABLE IF NOT EXISTS analysis_status (
   dynamics_status TEXT NOT NULL DEFAULT 'pending',
   regions_status TEXT NOT NULL DEFAULT 'pending',
   serp_status TEXT NOT NULL DEFAULT 'pending',
+  frequency_status TEXT,
   updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS root_expansions (
@@ -49,6 +51,8 @@ CREATE INDEX IF NOT EXISTS idx_serp_url ON serp(normalized_url);
   const columns = new Set(db.prepare('PRAGMA table_info(api_calls)').all().map((column) => column.name));
   if (!columns.has('request_json')) db.exec('ALTER TABLE api_calls ADD COLUMN request_json TEXT');
   if (!columns.has('response_json')) db.exec('ALTER TABLE api_calls ADD COLUMN response_json TEXT');
+  const statusColumns = new Set(db.prepare('PRAGMA table_info(analysis_status)').all().map((column) => column.name));
+  if (!statusColumns.has('frequency_status')) db.exec('ALTER TABLE analysis_status ADD COLUMN frequency_status TEXT');
   db.exec('DROP INDEX IF EXISTS idx_calls_quota; CREATE INDEX idx_calls_quota ON api_calls(api,started_at)');
   return db;
 }
@@ -92,7 +96,7 @@ export function recoverProcessing(db) {
   const now = new Date().toISOString();
   return db.transaction(() => {
     const changes = db.prepare("UPDATE queries SET status='queued' WHERE status='processing'").run().changes;
-    for (const stage of ['dynamics_status', 'regions_status', 'serp_status']) {
+    for (const stage of ['frequency_status', 'dynamics_status', 'regions_status', 'serp_status']) {
       db.prepare(`UPDATE analysis_status SET ${stage}='pending', updated_at=? WHERE ${stage}='processing'`).run(now);
     }
     return changes;
@@ -111,10 +115,10 @@ export function quotaState(db, now = Date.now()) {
 export function calculateRunStatus(db) {
   const unfinishedQueries = db.prepare("SELECT COUNT(*) count FROM queries WHERE status IN ('queued','processing')").get().count;
   const unfinishedStages = db.prepare(`SELECT COUNT(*) count FROM analysis_status WHERE
-    dynamics_status IN ('pending','processing') OR regions_status IN ('pending','processing') OR serp_status IN ('pending','processing')`).get().count;
+    frequency_status IN ('pending','processing') OR dynamics_status IN ('pending','processing') OR regions_status IN ('pending','processing') OR serp_status IN ('pending','processing')`).get().count;
   if (unfinishedQueries || unfinishedStages) return 'incomplete';
   const failedQueries = db.prepare("SELECT COUNT(*) count FROM queries WHERE status='failed'").get().count;
   const failedStages = db.prepare(`SELECT COUNT(*) count FROM analysis_status WHERE
-    dynamics_status='failed' OR regions_status='failed' OR serp_status='failed'`).get().count;
+    frequency_status='failed' OR dynamics_status='failed' OR regions_status='failed' OR serp_status='failed'`).get().count;
   return failedQueries || failedStages ? 'completed_with_errors' : 'completed';
 }
