@@ -86,7 +86,7 @@ function semanticSignals(query, context = {}) {
   const product = accessory || matcher.hasAnyToken(PRODUCT) || matcher.hasAllowedPrefix(SAFE_PREFIXES.product) || fuel;
   const technical = matcher.tokens.some((token) => TECHNICAL.has(token)) || product;
   const genericPrefixes = [...SAFE_PREFIXES.fuel, ...SAFE_PREFIXES.product, ...SAFE_PREFIXES.commercial];
-  const isMeaningfulAnchor = (token, minimumLength) => !GENERIC_ANCHORS.has(token) && !genericPrefixes.some((prefix) => token.startsWith(prefix)) && token.length >= minimumLength;
+  const isMeaningfulAnchor = (token, minimumLength) => token !== 'flexible' && !FLEXIBLE_PREFIXES.some((prefix) => token.startsWith(prefix)) && !GENERIC_ANCHORS.has(token) && !genericPrefixes.some((prefix) => token.startsWith(prefix)) && token.length >= minimumLength;
   const meaningfulRoot = new Set(root.tokens.filter((token) => isMeaningfulAnchor(token, 3)));
   const meaningfulParent = new Set(parent.tokens.filter((token) => isMeaningfulAnchor(token, 4)));
   const rootOverlap = matcher.tokens.filter((token) => meaningfulRoot.has(token));
@@ -134,9 +134,12 @@ export function classifyQuery(query, context = {}) {
   const strongFuelTankContext = signal.domain || signal.entity || signal.targetFuelTank || signal.trustedRootOverlap;
   let relevanceClass = 'noise';
   if (signal.hardNoise || signal.negative) reasons.push(signal.hardNoise ? 'hard-noise intent or market' : 'negative market token');
-  else if (signal.targetFuelTank || ((signal.fuel && signal.tank && strongFuelTankContext && !signal.accessory) || (signal.tank && signal.domain && !signal.accessory))) {
+  else if (signal.targetFuelTank || (signal.fuel && signal.tank && strongFuelTankContext && !signal.accessory)) {
     relevanceClass = 'core';
     reasons.push('fuel-tank product combination');
+  } else if (signal.tank && signal.domain && !signal.accessory) {
+    relevanceClass = 'adjacent';
+    reasons.push('tank in UAV/aviation domain without explicit fuel context');
   } else if (signal.entity && (signal.technical || signal.model)) {
     relevanceClass = 'adjacent';
     reasons.push(`entity anchor: ${signal.matchedEntities.join(', ')}`);

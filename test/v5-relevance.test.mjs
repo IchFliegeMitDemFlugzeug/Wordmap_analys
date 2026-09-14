@@ -14,6 +14,8 @@ test('an untrusted root overlap cannot promote semantic drift', () => {
   assertNotEligible(classifyQuery('вентиляция топливного бака опель', { rootSeed: 'вентиляция топливного бака' }));
   const association = classifyQuery('крышка топливного бака каталог', { rootSeed: 'крышка топливного бака', relationType: 'ASSOCIATION' });
   assert.equal(association.recursiveEligible, false);
+  assertNotEligible(classifyQuery('мягкий бак для воды', { rootSeed: 'мягкий топливный бак' }));
+  assertNotEligible(classifyQuery('flexible water tank', { rootSeed: 'flexible fuel tank' }));
 });
 
 test('flexible fuel tanks are the target product without a UAV word', () => {
@@ -42,4 +44,11 @@ test('components require a trusted domain/entity context', () => {
   const model = classifyQuery('DLE130G fuel tank', { rootSeed: 'DLE130G engine', entities: ['DLE130G'] });
   assert.ok(['core', 'adjacent'].includes(model.relevanceClass));
   assert.equal(model.deepEligible, true);
+});
+
+test('a domain tank without explicit fuel context is adjacent rather than core', () => {
+  assert.equal(classifyQuery('топливный бак БПЛА').relevanceClass, 'core');
+  for (const query of ['бак БПЛА', 'бак для воды БПЛА', 'бак для химикатов БПЛА', 'топливный фильтр БПЛА']) {
+    assert.equal(classifyQuery(query).relevanceClass, 'adjacent', query);
+  }
 });
