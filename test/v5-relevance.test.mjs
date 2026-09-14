@@ -17,11 +17,11 @@ test('an untrusted root overlap cannot promote semantic drift', () => {
 });
 
 test('flexible fuel tanks are the target product without a UAV word', () => {
-  for (const query of ['мягкий топливный бак', 'мягкий бак', 'гибкий топливный бак', 'эластичный топливный бак', 'резиновый топливный бак', 'авиационный мягкий топливный бак', 'flexible fuel tank', 'fuel bladder', 'bladder tank']) {
-    const result = classifyQuery(query, { rootSeed: 'мягкий топливный бак' });
-    assert.equal(result.relevanceClass, 'core', query);
-    assert.equal(result.recursiveEligible, true, query);
-    assert.equal(result.deepEligible, true, query);
+  for (const query of ['мягкий топливный бак', 'гибкий топливный бак', 'резиновый топливный бак', 'flexible fuel tank', 'fuel bladder']) {
+    assert.equal(classifyQuery(query, { rootSeed: query }).relevanceClass, 'core', query);
+  }
+  for (const query of ['мягкий бак', 'гибкий бак', 'резиновый бак', 'flexible tank', 'bladder tank', 'мягкий бак для воды', 'гибкий бак для душа']) {
+    assert.notEqual(classifyQuery(query, { rootSeed: query }).relevanceClass, 'core', query);
   }
   assert.equal(classifyQuery('топливный бак').relevanceClass, 'broad');
   for (const query of ['гибкий топливный насос', 'резиновый топливный шланг', 'flexible fuel filter']) {

@@ -78,7 +78,10 @@ function semanticSignals(query, context = {}) {
   const bladder = matcher.hasToken('bladder');
   const tank = tankNoun || bladder;
   const flexible = matcher.hasToken('flexible') || bladder || matcher.hasAllowedPrefix(FLEXIBLE_PREFIXES);
-  const targetFuelTank = (flexible && tankNoun) || (bladder && (fuel || tankNoun));
+  const targetFuelTank =
+    fuel &&
+    flexible &&
+    (tankNoun || bladder);
   const accessory = matcher.hasAnyToken([...COMPONENT_FORMS, 'горловина', 'fitting', 'filter', 'pump', 'hose', 'tubing']) || matcher.hasAllowedPrefix(SAFE_PREFIXES.product);
   const product = accessory || matcher.hasAnyToken(PRODUCT) || matcher.hasAllowedPrefix(SAFE_PREFIXES.product) || fuel;
   const technical = matcher.tokens.some((token) => TECHNICAL.has(token)) || product;
@@ -103,8 +106,9 @@ function semanticSignals(query, context = {}) {
   const rootBladder = root.hasToken('bladder');
   const rootFlexible = root.hasToken('flexible') || rootBladder || root.hasAllowedPrefix(FLEXIBLE_PREFIXES);
   const rootTargetFuelTank =
-    (rootFlexible && rootTankNoun) ||
-    (rootBladder && (rootFuel || rootTankNoun));
+    rootFuel &&
+    rootFlexible &&
+    (rootTankNoun || rootBladder);
   const rootIsTrusted =
     rootDomain ||
     rootEntities.length > 0 ||
